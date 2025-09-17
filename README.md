@@ -1,93 +1,97 @@
 # RedFFmpegatron
 
+A Python GUI for **FFmpeg** with **AMD AMF hardware encoding** (HEVC / H.264 / AV1).  
+It provides a simple dark-themed interface with drag-and-drop support, presets, trimming, previews, and advanced encoder/audio/FPS options – no need to manually write FFmpeg commands.
 
+---
 
-## Getting started
+## Features
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- **Drag and drop** video files into the window
+- **Codec support:** HEVC (H.265), H.264, AV1 via AMF
+- **Bitrate mode** or **Constant QP mode**
+- **Audio settings:** disable, copy, AAC (96k / 160k / 256k) or custom
+- **Advanced encoder options:**
+  - Usage (transcoding, lowlatency, ultralowlatency, high_quality, etc.)
+  - Quality presets (speed, balanced, quality)
+  - Profiles (main, main10)
+  - Levels and tiers
+  - Rate-control (cbr, vbr, hqvbr, qvbr, etc.)
+  - AMF-specific toggles: Preanalysis, VBAQ, Enforce HRD
+- **FPS and scaling settings**
+  - Change FPS (source, 60, 50, 30, 23.976, custom)
+  - Resize to HD/FHD/QHD/4K/Custom width
+  - Interpolation algorithms (bilinear, bicubic, lanczos, spline, etc.)
+- **VideoSR (super-resolution)**
+  - Algorithms, sharpness, ratio controls, pixel format selection
+- **Additional options**
+  - Trimming with start/end time
+  - Streamcopy mode
+  - Add custom FFmpeg options
+  - Video filters (crop, eq, unsharp, saturation, HDR→SDR, etc.)
+  - Audio filters (atempo, loudnorm, etc.)
+- **Presets system** for quick configuration
+- **10-second preview** encoding with current settings
+- **Estimated output size** (bitrate mode only)
+- **Built-in player buttons:** Play Input, Play Preview, Play Output
+- **Command preview** – shows full FFmpeg command, editable, copyable
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+---
 
-## Add your files
+## Requirements
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+- Windows OS (uses Win32 drag-and-drop)
+- Python 3.10 or newer
+- FFmpeg build with AMF support (`ffmpeg.exe`, `ffprobe.exe`)
+- Python dependencies:
+  - `customtkinter`
+  - `Pillow`
+  - `pywin32`
 
+Install dependencies with:
+
+```bash
+pip install customtkinter pillow pywin32
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/hadoukez/redffmpegatron.git
-git branch -M main
-git push -uf origin main
-```
 
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.com/hadoukez/redffmpegatron/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+---
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+1. Download or build FFmpeg with AMF support and place `ffmpeg.exe` in PATH or select it in the app.
+2. Run the program:
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```bash
+python RedFFmpegatron.py
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+3. Drag & drop a video file or use the **Browse** button.
+4. Select codec, bitrate/quality, audio, and encoder options.
+5. Press **Convert** to start encoding.
+6. Optionally use **Play 10s Preview** before running full conversion.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+---
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Example FFmpeg commands
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Encoding to HEVC (H.265) with AMF at 6 Mbps:
 
-## License
-For open source projects, say how it is licensed.
+```bash
+ffmpeg -hwaccel auto -i input.mp4 -c:v hevc_amf -b:v 6000k -c:a copy output_hevc.mp4
+```
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Encoding with Constant QP mode (Quality 30):
+
+```bash
+ffmpeg -hwaccel auto -i input.mp4 -c:v hevc_amf -qp_i 30 -qp_p 30 -c:a copy output_cqp.mp4
+```
+
+The GUI automatically builds commands like these based on your settings.
+
+---
+
+## Notes
+
+- This app is designed for AMD GPUs that support **AMF hardware encoding**.
+- For NVIDIA GPUs use [NVENCFF Toolbox](https://gitlab.com/hadoukez/nvencff-toolbox).
+- The tool is intended for Windows only.
