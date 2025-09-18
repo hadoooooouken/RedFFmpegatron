@@ -98,8 +98,8 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
         --windows-icon-from-ico="icon.ico" ^
         --include-data-file=icon.ico=./ ^
         --product-name="RedFFmpegatron" ^
-        --product-version="1.0.0" ^
-        --file-version="1.0.0" ^
+        --product-version="1.0.1" ^
+        --file-version="1.0.1" ^
         --file-description="RedFFmpegatron" ^
         --company-name="Deepseek Enjoyer" ^
         --copyright="Copyright (C) 2025 hadouken" ^

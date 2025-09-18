@@ -1338,11 +1338,11 @@ class VideoConverterApp:
             width=100,
         ).pack(side="left")
 
-        # Preview button
+        # Denoise button
         ctk.CTkButton(
             speed_buttons_frame,
-            text="Preview 10s",
-            command=lambda: self._add_preview_option(),
+            text="Denoise",
+            command=lambda: self._add_video_filter("hqdn3d=2:1:3:3"),
             fg_color=ACCENT_RED_2,
             hover_color=HOVER_RED,
             text_color=TEXT_BUTTON,
