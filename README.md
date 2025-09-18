@@ -50,6 +50,7 @@ To use the RedFFmpegatron, you will need:
 
 * **Windows Operating System:** The application is built for Windows 10/11.
 * **FFmpeg:** You need to have FFmpeg installed on your system and its executable (`ffmpeg.exe`) accessible in your system's PATH, or specify its path within the application.
+FFmpeg Windows builds links: [Windows builds from gyan.dev](https://www.gyan.dev/ffmpeg/builds/) or [Windows builds by BtbN](https://github.com/BtbN/FFmpeg-Builds/releases)
 * **AMD GPU with AMF Support:** For hardware-accelerated encoding, an AMD graphics card with AMF capabilities is required. Ensure you have the latest AMD GPU drivers installed.
 
 ### Installation
