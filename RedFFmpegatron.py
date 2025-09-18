@@ -125,7 +125,7 @@ class VideoConverterApp:
         self.preview_job = None  # used for debouncing preview creation
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.0.0")
+        master.title("RedFFmpegatron 1.0.1")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
