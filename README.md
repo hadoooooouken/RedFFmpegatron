@@ -2,20 +2,6 @@
 
 # RedFFmpegatron 🚀
 
-## Table of Contents
-- [About the Project](#about-the-project)
-- [Features](#features)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Building Executable (For Developers)](#building-executable-for-developers)
-- [Usage](#usage)
-- [Contributing](#contributing)
-
----
-
-## About The Project
-
 A Python GUI for **FFmpeg** with **AMD AMF hardware encoding** (HEVC / H.264 / AV1).  
 It provides a simple dark-themed interface with drag-and-drop support, presets, trimming, previews, and advanced encoder/audio/FPS options – no need to manually write FFmpeg commands.
 
