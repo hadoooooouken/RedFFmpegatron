@@ -143,5 +143,5 @@ If you have a suggestion that would make this better, you can simply open an iss
 ## Notes
 
 - This app is designed for AMD GPUs that support **AMF hardware encoding**.
-- For NVIDIA GPUs use [NVENCFF Toolbox](https://gitlab.com/hadoukez/nvencff-toolbox).
+- For NVIDIA GPUs use [nvencFF Toolbox](https://gitlab.com/hadoukez/nvencff-toolbox).
 - The tool is intended for Windows only.
