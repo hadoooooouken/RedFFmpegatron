@@ -1,5 +1,8 @@
 # RedFFmpegatron - Changelog
 
+## [1.0.2] - 2025-09-25
+- Cosmetic UI fixes
+
 ## [1.0.1] - 2025-09-18
 - Added "Denoise" button (replacing the broken "Preview 10s" button)
 
