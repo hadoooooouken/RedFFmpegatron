@@ -94,17 +94,18 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
     Navigate to the project's root directory in your terminal and run the following command. This command configures Nuitka to create a standalone, single-file executable with disabled console mode, include necessary packages, set application metadata, and specify an icon.
 
     ```
-        python -m nuitka --msvc=latest --standalone --windows-console-mode=disable ^
-        --include-package=customtkinter --enable-plugin=tk-inter ^
-        --windows-icon-from-ico="icon.ico" ^
-        --include-data-file=icon.ico=./ ^
-        --product-name="RedFFmpegatron" ^
-        --product-version="1.0.2" ^
-        --file-version="1.0.2" ^
-        --file-description="RedFFmpegatron" ^
-        --company-name="Deepseek Enjoyer" ^
-        --copyright="Copyright (C) 2025 hadouken" ^
-        --output-dir=build "RedFFmpegatron.py"
+      python -m nuitka --msvc=latest --standalone --windows-console-mode=disable ^
+      --include-package=customtkinter --enable-plugin=tk-inter ^
+      --windows-icon-from-ico="icon.ico" ^
+      --include-data-file=icon.ico=./ ^
+      --include-data-file=rff-help.txt=./rff-help.txt ^
+      --product-name="RedFFmpegatron" ^
+      --product-version="1.0.3" ^
+      --file-version="1.0.3" ^
+      --file-description="RedFFmpegatron" ^
+      --company-name="Deepseek Enjoyer" ^
+      --copyright="Copyright (C) 2025 hadouken" ^
+      --output-dir=build "RedFFmpegatron.py"
     ```
     The compiled executable will be found in the `build` directory specified by `--output-dir`.
 

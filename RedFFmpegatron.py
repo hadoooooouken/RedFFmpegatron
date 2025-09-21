@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import tkinter as tk
 from io import BytesIO
 from re import sub
 from shlex import split
@@ -19,14 +20,13 @@ from win32gui import CallWindowProc, DragAcceptFiles, SetWindowLong
 ctk.set_appearance_mode("dark")
 PRIMARY_BG = "#0e1113"
 SECONDARY_BG = "#171b1f"
+ACCENT_RED = "#ff5555"
 HOVER_RED = "#d83636"
-ACCENT_RED = "#FF5555"
 ACCENT_GREY = "#b2b2b2"
 HOVER_GREY = "#8e8e8e"
-ACCENT_RED_2 = "#ff4a4a"
-TEXT_COLOR_W = "#FFFFFF"
+TEXT_COLOR_W = "#ffffff"
 TEXT_COLOR_B = "#000000"
-PLACEHOLDER_COLOR = "#A0A0A0"
+PLACEHOLDER_COLOR = "#a0a0a0"
 
 
 class DropTarget:
@@ -59,12 +59,23 @@ class DropTarget:
 
 class VideoConverterApp:
     def _handle_dropped_file(self, file_path):
+        # run another thread
+        Thread(
+            target=self._process_dropped_file, args=(file_path,), daemon=True
+        ).start()
+
+    def _process_dropped_file(self, file_path):
         if file_path.lower().endswith(
             (".mp4", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".webm")
         ):
             normalized_path = os.path.normpath(file_path)
-            self.input_file.set(normalized_path)
-            self.input_file_entry.configure(text_color=TEXT_COLOR_W)
+
+            # refresh GUI from main thread
+            self.master.after(0, lambda: self.input_file.set(normalized_path))
+            self.master.after(
+                0, lambda: self.input_file_entry.configure(text_color=TEXT_COLOR_W)
+            )
+
             base_name = os.path.splitext(os.path.basename(normalized_path))[0]
             codec_suffix = (
                 "_hevc"
@@ -79,16 +90,23 @@ class VideoConverterApp:
                     f"{base_name}{codec_suffix}_custom.mp4",
                 )
             )
-            self.output_file.set(output_path)
-            self.trim_start.set("00:00:00")
-            self.total_duration = 0
-            self.status_text.set("File selected. Ready for conversion.")
-            self._calculate_estimated_size()
-            self._set_trim_end_to_duration()
+
+            self.master.after(0, lambda: self.output_file.set(output_path))
+            self.master.after(0, lambda: self.trim_start.set("00:00:00"))
+            self.master.after(0, lambda: setattr(self, "total_duration", 0))
+            self.master.after(
+                0, lambda: self.status_text.set("File selected. Ready for conversion.")
+            )
+            self.master.after(0, self._calculate_estimated_size)
+            self.master.after(0, self._set_trim_end_to_duration)
 
         else:
-            messagebox.showwarning(
-                "Unsupported File", "Please drop a video file (.mp4, .mkv, .avi, etc.)"
+            self.master.after(
+                0,
+                lambda: messagebox.showwarning(
+                    "Unsupported File",
+                    "Please drop a video file (.mp4, .mkv, .avi, etc.)",
+                ),
             )
 
     # App window position
@@ -127,7 +145,7 @@ class VideoConverterApp:
         self.preview_job = None  # used for debouncing preview creation
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.0.2")
+        master.title("RedFFmpegatron 1.0.3")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -344,7 +362,7 @@ class VideoConverterApp:
         """Update progress for preview encoding"""
         if "time=" in line:
             time_pos = line.find("time=")
-            time_str = line[time_pos + 5:].split()[0]
+            time_str = line[time_pos + 5 :].split()[0]
             try:
                 h, m, s = time_str.split(":")
                 total_seconds = int(h) * 3600 + int(m) * 60 + float(s)
@@ -370,16 +388,9 @@ class VideoConverterApp:
         self.profile = ctk.StringVar(value="main")
         self.level = ctk.StringVar(value="auto")
         self.tier = ctk.StringVar(value="1")
-        self.multipass = ctk.StringVar(value="qres")
         self.rc = ctk.StringVar(value="hqcbr")
         self.rc.trace_add("write", self._update_rate_control_settings)
-        self.lookahead_level = ctk.StringVar(value="-1")
-        self.enforce_hrd = ctk.BooleanVar(value=False)
-        self.spatial_aq = ctk.BooleanVar(value=True)
-        self.temporal_aq = ctk.BooleanVar(value=True)
-        self.no_scenecut = ctk.BooleanVar(value=False)
-        self.weighted_pred = ctk.BooleanVar(value=False)
-        self.highbitdepth = ctk.BooleanVar(value=False)
+        self.hwaccel = ctk.StringVar(value="amf")
         self.enable_fps_scale_options = ctk.BooleanVar(value=False)
         self.fps_option = ctk.StringVar(value="source")
         self.custom_fps = ctk.StringVar(value="30")
@@ -414,9 +425,13 @@ class VideoConverterApp:
         self.trim_start = ctk.StringVar(value="00:00:00")
         self.trim_end = ctk.StringVar(value="00:00:00")
         self.trim_streamcopy = ctk.BooleanVar(value=False)
-        self.usage = ctk.StringVar(value="transcoding")  # AMF usage parameter
-        self.preanalysis = ctk.BooleanVar(value=False)  # AMF preanalysis
-        self.vbaq = ctk.BooleanVar(value=False)  # AMF VBAQ
+        self.usage = ctk.StringVar(value="transcoding")
+        self.vbaq = ctk.BooleanVar(value=True)
+        self.preencode = ctk.BooleanVar(value=False)
+        self.max_pa = ctk.BooleanVar(value=False)
+        self.preanalysis = ctk.BooleanVar(value=False)
+        self.preanalysis.trace_add("write", lambda *args: self._update_max_pa_state())
+        self.smart_access_video = ctk.BooleanVar(value=False)
         self.enable_videosr = ctk.BooleanVar(value=False)
         self.videosr_algorithm = ctk.StringVar(value="sr1-1")
         self.videosr_sharpness = ctk.StringVar(value="-1")
@@ -446,15 +461,41 @@ class VideoConverterApp:
 
     def _copy_text(self):
         widget = self.master.focus_get()
-        if hasattr(widget, "get"):
-            self.master.clipboard_clear()
-            text = widget.get()
-            if hasattr(widget, "selection_get"):
+        self.master.clipboard_clear()
+
+        try:
+            if isinstance(widget, (ctk.CTkTextbox, tk.Text)):
+                try:
+                    if widget.tag_ranges("sel"):
+                        text = widget.get("sel.first", "sel.last")
+                    else:
+                        text = widget.get("1.0", "end-1c")
+                except Exception:
+                    text = widget.get("1.0", "end-1c")
+
+            elif isinstance(widget, ctk.CTkEntry):
+                try:
+                    entry = widget._entry
+                    if entry.selection_present():
+                        text = entry.selection_get()
+                    else:
+                        text = widget.get()
+                except Exception:
+                    text = widget.get()
+
+            elif hasattr(widget, "get"):
                 try:
                     text = widget.selection_get()
                 except Exception:
-                    pass
-            self.master.clipboard_append(text)
+                    text = widget.get()
+            else:
+                text = ""
+
+        except Exception as e:
+            print(f"Error copying text: {e}")
+            text = ""
+
+        self.master.clipboard_append(text)
 
     def _paste_text(self):
         widget = self.master.focus_get()
@@ -464,7 +505,7 @@ class VideoConverterApp:
                 if hasattr(widget, "delete"):
                     widget.delete(0, "end")
                 widget.insert("insert", text)
-            except ctk.TclError:
+            except tk.TclError:
                 pass
 
     def _create_widgets(self):
@@ -498,7 +539,7 @@ class VideoConverterApp:
             main_frame,
             text="Browse",
             command=self._browse_input,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
         ).grid(row=0, column=2, padx=5, pady=5)
@@ -520,7 +561,7 @@ class VideoConverterApp:
             main_frame,
             text="Save As",
             command=self._browse_output,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
         ).grid(row=1, column=2, padx=5, pady=5)
@@ -575,7 +616,7 @@ class VideoConverterApp:
             text="Constant QP mode",
             variable=self.constant_qp_mode,
             command=self._toggle_constant_qp_mode,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         self.constant_qp_checkbox.pack(side="left", padx=(10, 0))
@@ -599,6 +640,15 @@ class VideoConverterApp:
             text_color=TEXT_COLOR_B,
         ).grid(row=3, column=2, sticky="w", padx=5, pady=5)
 
+        ctk.CTkButton(
+            main_frame,
+            text="Help",
+            command=self._show_main_help,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+        ).grid(row=4, column=2, sticky="w", padx=5, pady=5)
+
         # Video Codec Selection
         ctk.CTkLabel(main_frame, text="Video Codec:").grid(
             row=4, column=0, sticky="w", padx=10, pady=5
@@ -612,7 +662,7 @@ class VideoConverterApp:
             variable=self.video_codec,
             value="hevc",
             command=self._update_codec_settings,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         hevc_rb.pack(side="left", padx=5)
@@ -623,7 +673,7 @@ class VideoConverterApp:
             variable=self.video_codec,
             value="h264",
             command=self._update_codec_settings,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         h264_rb.pack(side="left", padx=5)
@@ -634,7 +684,7 @@ class VideoConverterApp:
             variable=self.video_codec,
             value="av1",
             command=self._update_codec_settings,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         av1_rb.pack(side="left", padx=5)
@@ -645,7 +695,7 @@ class VideoConverterApp:
             text="Advanced Encoder Settings",
             variable=self.enable_encoder_options,
             command=self._toggle_encoder_options_frame,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         encoder_options_frame_toggle.grid(row=5, column=0, sticky="w", padx=10, pady=5)
@@ -675,10 +725,10 @@ class VideoConverterApp:
                 "lowlatency_high_quality",
             ],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         usage_option_menu.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
@@ -691,10 +741,10 @@ class VideoConverterApp:
             variable=self.preset,
             values=["speed", "balanced", "quality"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         preset_option_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
 
@@ -707,10 +757,10 @@ class VideoConverterApp:
             variable=self.profile,
             values=["main", "main10"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         profile_option_menu.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
 
@@ -738,10 +788,10 @@ class VideoConverterApp:
                 "6.2",
             ],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         level_option_menu.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
 
@@ -755,10 +805,10 @@ class VideoConverterApp:
             variable=self.tier,
             values=["0", "1"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         self.tier_option_menu.grid(row=4, column=1, sticky="ew", padx=5, pady=2)
 
@@ -773,10 +823,10 @@ class VideoConverterApp:
             variable=self.coder,
             values=["default", "auto", "cabac", "cavlc", "ac", "vlc"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         self.coder_option_menu.grid(row=4, column=1, sticky="ew", padx=5, pady=2)
         self.coder_option_menu.grid_remove()  # hide by default
@@ -800,55 +850,91 @@ class VideoConverterApp:
             variable=self.rc,
             values=["vbr_latency", "vbr_peak", "cbr", "qvbr", "hqvbr", "hqcbr"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         rc_option_menu.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
+
+        # HW Accel
+        ctk.CTkLabel(right_column_frame, text="HW Accel:").grid(
+            row=1, column=0, sticky="w", padx=5, pady=2
+        )
+        hwaccel_option_menu = ctk.CTkOptionMenu(
+            right_column_frame,
+            variable=self.hwaccel,
+            values=["auto", "amf", "d3d11va", "dxva2"],
+            fg_color=PRIMARY_BG,
+            button_color=ACCENT_RED,
+            button_hover_color=HOVER_RED,
+            dropdown_fg_color=SECONDARY_BG,
+            dropdown_hover_color=ACCENT_RED,
+        )
+        hwaccel_option_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
 
         # QVBR Quality Label
         self.qvbr_quality_level_label = ctk.CTkLabel(
             right_column_frame, text="QVBR Quality:"
         )
-        self.qvbr_quality_level_label.grid(row=1, column=0, sticky="w", padx=5, pady=2)
+        self.qvbr_quality_level_label.grid(row=2, column=0, sticky="w", padx=5, pady=2)
         self.qvbr_quality_level_label.grid_remove()
 
         # QVBR Quality Entry
         self.qvbr_quality_level_entry = ctk.CTkEntry(
             right_column_frame,
-            textvariable=ctk.StringVar(value="28"),  # Default QVBR quality
+            textvariable=ctk.StringVar(value="23"),  # Default QVBR quality
             width=80,
             fg_color=SECONDARY_BG,
             text_color=TEXT_COLOR_W,
         )
-        self.qvbr_quality_level_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+        self.qvbr_quality_level_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
         self.qvbr_quality_level_entry.grid_remove()
 
         # Checkboxes for AMF specific features
         ctk.CTkCheckBox(
             right_column_frame,
-            text="Preanalysis",
-            variable=self.preanalysis,
-            fg_color=ACCENT_RED_2,
-            hover_color=HOVER_RED,
-        ).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=2)
-
-        ctk.CTkCheckBox(
-            right_column_frame,
             text="VBAQ",
             variable=self.vbaq,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
-        ).grid(row=3, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+        ).grid(row=0, column=2, columnspan=2, sticky="w", padx=5, pady=2)
 
         ctk.CTkCheckBox(
             right_column_frame,
-            text="Enforce HRD",
-            variable=self.enforce_hrd,
-            fg_color=ACCENT_RED_2,
+            text="Preencode",
+            variable=self.preencode,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
-        ).grid(row=4, column=0, columnspan=2, sticky="w", padx=5, pady=2)
+        ).grid(row=1, column=2, columnspan=2, sticky="w", padx=5, pady=2)
+
+        ctk.CTkCheckBox(
+            right_column_frame,
+            text="Preanalysis",
+            variable=self.preanalysis,
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+        ).grid(row=2, column=2, columnspan=2, sticky="w", padx=5, pady=2)
+
+        self.max_pa_checkbox = ctk.CTkCheckBox(
+            right_column_frame,
+            text="Max PA",
+            variable=self.max_pa,
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+        )
+        self.max_pa_checkbox.grid(
+            row=3, column=2, columnspan=2, sticky="w", padx=5, pady=2
+        )
+        self._update_max_pa_state()
+
+        ctk.CTkCheckBox(
+            right_column_frame,
+            text="Smart Access",
+            variable=self.smart_access_video,
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+        ).grid(row=4, column=2, columnspan=2, sticky="w", padx=5, pady=2)
 
         # FPS and Scaling
         fps_scale_frame_toggle = ctk.CTkCheckBox(
@@ -856,7 +942,7 @@ class VideoConverterApp:
             text="FPS and Scaling Settings",
             variable=self.enable_fps_scale_options,
             command=self._toggle_fps_scale_options_frame,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         fps_scale_frame_toggle.grid(row=7, column=0, sticky="w", padx=10, pady=5)
@@ -882,7 +968,7 @@ class VideoConverterApp:
                 variable=self.fps_option,
                 value=value,
                 command=self._toggle_custom_fps_entry,
-                fg_color=ACCENT_RED_2,
+                fg_color=ACCENT_RED,
                 hover_color=HOVER_RED,
             )
             rb.grid(row=1, column=i + 1, sticky="w", padx=2)
@@ -893,7 +979,7 @@ class VideoConverterApp:
             variable=self.fps_option,
             value="custom",
             command=self._toggle_custom_fps_entry,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         rb_custom.grid(row=2, column=1, sticky="w", padx=2, pady=(10, 10))
@@ -933,7 +1019,7 @@ class VideoConverterApp:
                 variable=self.video_format_option,
                 value=value,
                 command=self._toggle_custom_video_width_entry,
-                fg_color=ACCENT_RED_2,
+                fg_color=ACCENT_RED,
                 hover_color=HOVER_RED,
             )
             if value == "custom":
@@ -970,10 +1056,10 @@ class VideoConverterApp:
             variable=self.interpolation_algo,
             values=["bilinear", "bicubic", "neighbor", "area", "lanczos", "spline"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         interp_option_menu.grid(row=5, column=1, sticky="ew", padx=5, pady=2)
 
@@ -992,7 +1078,7 @@ class VideoConverterApp:
             text="VideoSR",
             variable=self.enable_videosr,
             command=self._toggle_videosr_options,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         self.videosr_checkbox.grid(row=4, column=0, sticky="w", padx=10, pady=(10, 2))
@@ -1014,10 +1100,10 @@ class VideoConverterApp:
             variable=self.videosr_algorithm,
             values=["sr1-0", "sr1-1", "bilinear", "bicubic", "point"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         videosr_algo_menu.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
@@ -1042,10 +1128,10 @@ class VideoConverterApp:
             variable=self.videosr_pixel_format,
             values=["rgb24", "yuv444p", "rgba", "same"],
             fg_color=PRIMARY_BG,
-            button_color=ACCENT_RED_2,
+            button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
-            dropdown_hover_color=ACCENT_RED_2,
+            dropdown_hover_color=ACCENT_RED,
         )
         videosr_pixel_format_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
 
@@ -1054,7 +1140,7 @@ class VideoConverterApp:
             self.videosr_options_frame,
             text="Keep Aspect Ratio",
             variable=self.videosr_keep_ratio,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         ).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=2)
 
@@ -1063,7 +1149,7 @@ class VideoConverterApp:
             self.videosr_options_frame,
             text="Fill",
             variable=self.videosr_fill,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         ).grid(row=2, column=2, columnspan=2, sticky="w", padx=5, pady=2)
 
@@ -1076,7 +1162,7 @@ class VideoConverterApp:
             text="Audio Settings",
             variable=self.enable_audio_options,
             command=self._toggle_audio_options_frame,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         audio_frame_toggle.grid(row=9, column=0, sticky="w", padx=10, pady=5)
@@ -1101,7 +1187,7 @@ class VideoConverterApp:
                 variable=self.audio_option,
                 value=value,
                 command=self._toggle_custom_abitrate,
-                fg_color=ACCENT_RED_2,
+                fg_color=ACCENT_RED,
                 hover_color=HOVER_RED,
             )
             rb.grid(row=0, column=i, sticky="w", padx=10, pady=10)
@@ -1112,7 +1198,7 @@ class VideoConverterApp:
             variable=self.audio_option,
             value="custom",
             command=self._toggle_custom_abitrate,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         self.custom_audio_rb.grid(row=1, column=0, sticky="w", padx=10, pady=2)
@@ -1132,7 +1218,7 @@ class VideoConverterApp:
             text="Additional Options (Trimming)",
             variable=self.enable_additional_options,
             command=self._toggle_additional_options_frame,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         additional_options_toggle.grid(row=11, column=0, sticky="w", padx=10, pady=5)
@@ -1215,7 +1301,7 @@ class VideoConverterApp:
             trim_frame,
             text="Trim",
             command=self._add_trim_options,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
@@ -1227,7 +1313,7 @@ class VideoConverterApp:
             text="Streamcopy",
             command=lambda: self.audio_option.set("copy"),
             variable=self.trim_streamcopy,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         ).grid(row=2, column=7)
 
@@ -1302,7 +1388,7 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Speed up X2",
             command=lambda: self._set_speed_filter("2.0"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
@@ -1312,44 +1398,44 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Slow down X2",
             command=lambda: self._set_speed_filter("0.5"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 10))
 
         # Sharpness button
         ctk.CTkButton(
             quick_buttons_frame,
             text="Sharpness",
             command=lambda: self._add_video_filter("unsharp=5:5:1.15:3:3:0.0"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left", padx=(10, 10))
+        ).pack(side="left", padx=(0, 10))
 
         # Saturation button
         ctk.CTkButton(
             quick_buttons_frame,
             text="Saturation",
             command=lambda: self._add_video_filter("eq=saturation=1.15"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 10))
 
         # Denoise button
         ctk.CTkButton(
             quick_buttons_frame,
             text="Denoise",
-            command=lambda: self._add_video_filter("hqdn3d=2:1:3:3"),
-            fg_color=ACCENT_RED_2,
+            command=lambda: self._add_video_filter("hqdn3d=2:1.5:3:2.25"),
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left", padx=(10, 0))
+        ).pack(side="left", padx=(0, 10))
 
         # Reset button
         ctk.CTkButton(
@@ -1360,7 +1446,7 @@ class VideoConverterApp:
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left", padx=(10, 0))
+        ).pack(side="left")
 
         quick_buttons_frame_2 = ctk.CTkFrame(
             self.additional_options_frame, fg_color="transparent"
@@ -1374,7 +1460,7 @@ class VideoConverterApp:
             quick_buttons_frame_2,
             text="FPS Pass",
             command=lambda: self._add_additional_option("-fps_mode passthrough"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
@@ -1385,11 +1471,11 @@ class VideoConverterApp:
             quick_buttons_frame_2,
             text="Drop thresh",
             command=lambda: self._add_additional_option("-frame_drop_threshold 0.5"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 10))
 
         # Gamma RGB
         ctk.CTkButton(
@@ -1398,44 +1484,97 @@ class VideoConverterApp:
             command=lambda: self._add_video_filter(
                 "eq=gamma_r=1.0:gamma_g=1.0:gamma_b=1.0:gamma_weight=1.0"
             ),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left", padx=(10, 10))
+        ).pack(side="left", padx=(0, 10))
 
         # Brightness button
         ctk.CTkButton(
             quick_buttons_frame_2,
             text="Brightness",
             command=lambda: self._add_video_filter("eq=brightness=-0.15"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left")
+        ).pack(side="left", padx=(0, 10))
 
         # Audio fix button
         ctk.CTkButton(
             quick_buttons_frame_2,
             text="Audio fix",
             command=lambda: self._add_audio_filter("loudnorm=I=-16:TP=-1.5:LRA=11"),
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left", padx=(10, 0))
+        ).pack(side="left")
 
-        # Add HDR to SDR button here
+        quick_buttons_frame_3 = ctk.CTkFrame(
+            self.additional_options_frame, fg_color="transparent"
+        )
+        quick_buttons_frame_3.grid(
+            row=8, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
+        )
+
+        # Force 8 bit button
         ctk.CTkButton(
-            quick_buttons_frame_2,
+            quick_buttons_frame_3,
+            text="Force 8 bit",
+            command=lambda: self._add_additional_option("-pix_fmt:v nv12"),
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+            text_color=TEXT_COLOR_B,
+            width=100,
+        ).pack(side="left", padx=(0, 10))
+
+        # Force 10bit button
+        ctk.CTkButton(
+            quick_buttons_frame_3,
+            text="Force 10 bit",
+            command=lambda: self._add_additional_option("-pix_fmt:v p010le"),
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+            text_color=TEXT_COLOR_B,
+            width=100,
+        ).pack(side="left", padx=(0, 10))
+
+        # HDR to SDR button
+        ctk.CTkButton(
+            quick_buttons_frame_3,
             text="HDR to SDR",
             command=self._apply_hdr_to_sdr,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).pack(side="left", padx=(10, 0))
+        ).pack(side="left", padx=(0, 10))
+
+        # Crop to 16:9
+        ctk.CTkButton(
+            quick_buttons_frame_3,
+            text="Crop to 16:9",
+            command=lambda: self._add_video_filter(
+                "crop=iw:min(ih\,iw*9/16):0:(ih-min(ih\,iw*9/16))/2"
+            ),
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+            text_color=TEXT_COLOR_B,
+            width=100,
+        ).pack(side="left", padx=(0, 10))
+
+        # Rotate / transponse
+        ctk.CTkButton(
+            quick_buttons_frame_3,
+            text="Rotate",
+            command=lambda: self._add_video_filter("transpose=1"),
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+            text_color=TEXT_COLOR_B,
+            width=100,
+        ).pack(side="left")
 
         # Presets Section
         presets_frame_toggle = ctk.CTkCheckBox(
@@ -1443,7 +1582,7 @@ class VideoConverterApp:
             text="Presets",
             variable=self.enable_presets,
             command=self._toggle_presets_frame,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
         presets_frame_toggle.grid(row=13, column=0, sticky="w", padx=10, pady=5)
@@ -1464,7 +1603,7 @@ class VideoConverterApp:
                 variable=self.selected_preset,
                 value=value,
                 command=lambda v=value: self._apply_preset(v),
-                fg_color=ACCENT_RED_2,
+                fg_color=ACCENT_RED,
                 hover_color=HOVER_RED,
             )
             rb.grid(row=1, column=i, padx=10, pady=5, sticky="w")
@@ -1495,7 +1634,7 @@ class VideoConverterApp:
             self.progress_frame,
             variable=self.progress_value,
             fg_color=SECONDARY_BG,
-            progress_color=ACCENT_RED_2,
+            progress_color=ACCENT_RED,
         )
         self.progress_bar.pack(fill="x", expand=True)
         self.progress_label = ctk.CTkLabel(self.progress_frame, text="0%")
@@ -1544,7 +1683,7 @@ class VideoConverterApp:
             self.button_frame,
             text="Convert",
             command=self._toggle_conversion,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             height=40,
@@ -1673,7 +1812,7 @@ class VideoConverterApp:
                 button_frame,
                 text="Copy to Clipboard",
                 command=self._copy_command_to_clipboard,
-                fg_color=ACCENT_RED_2,
+                fg_color=ACCENT_RED,
                 hover_color=HOVER_RED,
                 text_color=TEXT_COLOR_B,
                 width=150,
@@ -1683,7 +1822,7 @@ class VideoConverterApp:
                 button_frame,
                 text="Apply Changes",
                 command=lambda: self._apply_command_changes(output_window),
-                fg_color=ACCENT_RED_2,
+                fg_color=ACCENT_RED,
                 hover_color=HOVER_RED,
                 text_color=TEXT_COLOR_B,
                 width=150,
@@ -1832,12 +1971,7 @@ class VideoConverterApp:
         command = [
             ffmpeg_path,
             "-hwaccel",
-            "auto",
-            *(
-                ["-hwaccel_output_format", "p010le"]
-                if hasattr(self, "hdr_mode") and self.hdr_mode
-                else []
-            ),
+            self.hwaccel.get(),
             "-threads",
             "4",
             "-y",
@@ -1960,11 +2094,48 @@ class VideoConverterApp:
                 self.preset.get(),
                 "-profile:v",
                 self.profile.get(),
+                "-level:v",
+                self.level.get(),
+                "-preencode:v",
+                "1" if self.preencode.get() else "0",
+                "-vbaq:v",
+                "1" if self.vbaq.get() else "0",
+                "-smart_access_video:v",
+                "1" if self.smart_access_video.get() else "0",
             ]
         )
 
-        if self.level.get() != "auto":
-            command.extend(["-level:v", self.level.get()])
+        # Preanalysis and Max PA options
+        command.extend(["-preanalysis:v", "1" if self.preanalysis.get() else "0"])
+        if self.preanalysis.get() and self.max_pa.get():
+            command.extend(
+                [
+                    "-pa_activity_type",
+                    "yuv",
+                    "-pa_scene_change_detection_enable",
+                    "1",
+                    "-pa_scene_change_detection_sensitivity",
+                    "high",
+                    "-pa_static_scene_detection_enable",
+                    "1",
+                    "-pa_static_scene_detection_sensitivity",
+                    "high",
+                    "-pa_caq_strength",
+                    "high",
+                    "-pa_frame_sad_enable",
+                    "1",
+                    "-pa_ltr_enable",
+                    "1",
+                    "-pa_paq_mode",
+                    "caq",
+                    "-pa_taq_mode",
+                    "2",
+                    "-pa_high_motion_quality_boost_mode",
+                    "1",
+                    "-pa_adaptive_mini_gop",
+                    "1",
+                ]
+            )
 
         if self.video_codec.get() in ("hevc", "av1"):
             command.extend(["-profile_tier:v", self.tier.get()])
@@ -2006,14 +2177,6 @@ class VideoConverterApp:
                 command.extend(["-qvbr_quality_level", str(qvbr_quality_level)])
             except ValueError:
                 raise ValueError("QVBR quality must be a number between 1-51")
-
-        # AMF specific options
-        if self.preanalysis.get():
-            command.extend(["-preanalysis", "1"])
-        if self.vbaq.get():
-            command.extend(["-vbaq", "1"])
-        if self.enforce_hrd.get():
-            command.extend(["-enforce_hrd", "1"])
 
         if self.enable_additional_options.get():
             add_val = self.additional_options.get().strip()
@@ -2157,7 +2320,7 @@ class VideoConverterApp:
         option_name = option_str.split()[0]
         for i, opt in enumerate(existing_options):
             if opt == option_name:
-                existing_options[i: i + 2] = option_str.split()
+                existing_options[i : i + 2] = option_str.split()
                 break
         else:
             existing_options.extend(option_str.split())
@@ -2271,7 +2434,9 @@ class VideoConverterApp:
         current_text = self.additional_audio_filter_options.get()
         if current_text == self.additional_audio_filter_options_placeholder:
             self.additional_audio_filter_options_entry.delete(0, "end")
-            self.additional_audio_filter_options_entry.configure(text_color=TEXT_COLOR_W)
+            self.additional_audio_filter_options_entry.configure(
+                text_color=TEXT_COLOR_W
+            )
 
     def _on_audio_filters_entry_focus_out(self, event):
         current_text = self.additional_audio_filter_options.get()
@@ -2545,13 +2710,13 @@ class VideoConverterApp:
             self.status_text.set("Conversion cancelled")
             self.progress_frame.grid_remove()
             self.convert_button.configure(
-                text="Convert", fg_color=ACCENT_RED_2, hover_color=HOVER_RED
+                text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
             )
 
     def _update_progress(self, line):
         if "time=" in line:
             time_pos = line.find("time=")
-            time_str = line[time_pos + 5:].split()[0]
+            time_str = line[time_pos + 5 :].split()[0]
             try:
                 h, m, s = time_str.split(":")
                 total_seconds = int(h) * 3600 + int(m) * 60 + float(s)
@@ -2774,7 +2939,7 @@ class VideoConverterApp:
                 self.master.after(
                     0,
                     lambda: self.convert_button.configure(
-                        text="Convert", fg_color=ACCENT_RED_2, hover_color=HOVER_RED
+                        text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
                     ),
                 )
                 self.master.after(0, lambda: MessageBeep(MB_ICONASTERISK))
@@ -2787,7 +2952,7 @@ class VideoConverterApp:
                 self.master.after(
                     0,
                     lambda: self.convert_button.configure(
-                        text="Convert", fg_color=ACCENT_RED_2, hover_color=HOVER_RED
+                        text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
                     ),
                 )
                 self.master.after(
@@ -2803,7 +2968,7 @@ class VideoConverterApp:
                 self.master.after(
                     0,
                     lambda: self.convert_button.configure(
-                        text="Convert", fg_color=ACCENT_RED_2, hover_color=HOVER_RED
+                        text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
                     ),
                 )
                 self.master.after(
@@ -2827,7 +2992,7 @@ class VideoConverterApp:
             self.master.after(
                 0,
                 lambda: self.convert_button.configure(
-                    text="Convert", fg_color=ACCENT_RED_2, hover_color=HOVER_RED
+                    text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
                 ),
             )
             self.master.after(
@@ -2853,7 +3018,7 @@ class VideoConverterApp:
             self.master.after(
                 0,
                 lambda: self.convert_button.configure(
-                    text="Convert", fg_color=ACCENT_RED_2, hover_color=HOVER_RED
+                    text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
                 ),
             )
             self.master.after(
@@ -2864,18 +3029,57 @@ class VideoConverterApp:
             )
             self.is_converting = False
 
+    def _show_main_help(self):
+        help_window = ctk.CTkToplevel(self.master)
+        help_window.title("RedFFmpegatron Help")
+        help_window.geometry("800x700")
+        help_window.configure(fg_color=PRIMARY_BG)
+
+        if getattr(sys, "frozen", False):
+            base_path = sys._MEIPASS
+        else:
+            base_path = os.path.dirname(os.path.abspath(__file__))
+
+        help_file_path = os.path.join(base_path, "rff-help.txt")
+
+        try:
+            with open(help_file_path, "r", encoding="utf-8") as f:
+                help_text = f.read()
+        except Exception as e:
+            help_text = f"Help file not found at: {help_file_path}\nError: {str(e)}"
+
+        text_frame = ctk.CTkFrame(help_window, fg_color=PRIMARY_BG)
+        text_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+        textbox = ctk.CTkTextbox(text_frame, wrap="word", fg_color=SECONDARY_BG)
+        textbox.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Configure text tags
+        textbox.tag_config("heading_color", foreground=ACCENT_RED)  # headings color
+
+        # Parse and insert text
+        lines = help_text.split("\n")
+        for line in lines:
+            if line.startswith("#"):
+                # remove #
+                textbox.insert("end", line[1:] + "\n", "heading_color")
+            else:
+                textbox.insert("end", line + "\n")
+
+        textbox.configure(state="disabled")
+
     def _show_help_window(self, title, help_type):
         help_window = ctk.CTkToplevel(self.master)
         help_window.title(title)
         help_window.geometry("800x600")
         help_window.transient(self.master)
         help_window.grab_set()
-        help_window.configure(fg_color=SECONDARY_BG)
+        help_window.configure(fg_color=PRIMARY_BG)
 
-        content_frame = ctk.CTkFrame(help_window, fg_color=SECONDARY_BG)
+        content_frame = ctk.CTkFrame(help_window, fg_color=PRIMARY_BG)
         content_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        text_scroll = ctk.CTkScrollableFrame(content_frame, fg_color=PRIMARY_BG)
+        text_scroll = ctk.CTkScrollableFrame(content_frame, fg_color=SECONDARY_BG)
         text_scroll.pack(fill="both", expand=True, padx=5, pady=5)
 
         help_text = ctk.CTkLabel(
@@ -2891,7 +3095,7 @@ class VideoConverterApp:
             content_frame,
             text="Close",
             command=help_window.destroy,
-            fg_color=ACCENT_RED_2,
+            fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
         )
@@ -3131,9 +3335,9 @@ class VideoConverterApp:
             self.level.set("auto")
             self.tier.set("1")
             self.rc.set("hqcbr")
+            self.preencode.set(False)
             self.preanalysis.set(False)
-            self.vbaq.set(False)
-            self.enforce_hrd.set(False)
+            self.vbaq.set(True)
 
             # Reset FPS and scaling options
             self.fps_option.set("source")
@@ -3167,7 +3371,7 @@ class VideoConverterApp:
             )
 
             self.preset_indicator.configure(
-                text="Default settings applied", text_color=ACCENT_RED_2
+                text="Default settings applied", text_color=ACCENT_RED
             )
 
         elif preset_name == "fhdf":
@@ -3192,15 +3396,15 @@ class VideoConverterApp:
             self.rc.set("hqcbr")
 
             # Flags
+            self.preencode.set(False)
             self.preanalysis.set(False)
             self.vbaq.set(False)
-            self.enforce_hrd.set(False)
 
             # Audio
             self.audio_option.set("aac_160k")
 
             self.preset_indicator.configure(
-                text="FHD Fast preset applied", text_color=ACCENT_RED_2
+                text="FHD Fast preset applied", text_color=ACCENT_RED
             )
 
         elif preset_name == "fhdq":
@@ -3225,15 +3429,15 @@ class VideoConverterApp:
             self.rc.set("hqvbr")
 
             # Flags
+            self.preencode.set(False)
             self.preanalysis.set(True)
             self.vbaq.set(True)
-            self.enforce_hrd.set(False)
 
             # Audio
             self.audio_option.set("aac_160k")
 
             self.preset_indicator.configure(
-                text="FHD Quality preset applied", text_color=ACCENT_RED_2
+                text="FHD Quality preset applied", text_color=ACCENT_RED
             )
 
         elif preset_name == "hdf":
@@ -3242,7 +3446,7 @@ class VideoConverterApp:
             self.enable_fps_scale_options.set(True)
 
             # Video settings
-            self.bitrate.set("4000")
+            self.bitrate.set("5000")
             self.quality_level.set("30")
             self.video_format_option.set("1280")
             self.interpolation_algo.set("bicubic")
@@ -3258,15 +3462,15 @@ class VideoConverterApp:
             self.rc.set("hqcbr")
 
             # Flags
+            self.preencode.set(False)
             self.preanalysis.set(False)
             self.vbaq.set(False)
-            self.enforce_hrd.set(False)
 
             # Audio
             self.audio_option.set("aac_160k")
 
             self.preset_indicator.configure(
-                text="HD Fast preset applied", text_color=ACCENT_RED_2
+                text="HD Fast preset applied", text_color=ACCENT_RED
             )
 
         elif preset_name == "hdq":
@@ -3291,15 +3495,15 @@ class VideoConverterApp:
             self.rc.set("hqvbr")
 
             # Flags
+            self.preencode.set(False)
             self.preanalysis.set(True)
             self.vbaq.set(True)
-            self.enforce_hrd.set(False)
 
             # Audio
             self.audio_option.set("aac_160k")
 
             self.preset_indicator.configure(
-                text="HD Quality preset applied", text_color=ACCENT_RED_2
+                text="HD Quality preset applied", text_color=ACCENT_RED
             )
 
         # Update UI
@@ -3556,16 +3760,16 @@ class VideoConverterApp:
 
         # Draw handles
         self.start_handle = self.trim_canvas.create_oval(
-            start_pos - 8, 15 - 8, start_pos + 8, 15 + 8, fill=ACCENT_RED_2, outline=""
+            start_pos - 8, 15 - 8, start_pos + 8, 15 + 8, fill=ACCENT_RED, outline=""
         )
         self.end_handle = self.trim_canvas.create_oval(
-            end_pos - 8, 15 - 8, end_pos + 8, 15 + 8, fill=ACCENT_RED_2, outline=""
+            end_pos - 8, 15 - 8, end_pos + 8, 15 + 8, fill=ACCENT_RED, outline=""
         )
 
         # Draw current selection
         if start_pos < end_pos:
             self.trim_canvas.create_rectangle(
-                start_pos, 12, end_pos, 18, fill=ACCENT_RED_2, outline=""
+                start_pos, 12, end_pos, 18, fill=ACCENT_RED, outline=""
             )
 
     def _time_to_slider_positions(self):
@@ -3837,6 +4041,16 @@ class VideoConverterApp:
             # Hide QVBR quality controls
             self.qvbr_quality_level_label.grid_remove()
             self.qvbr_quality_level_entry.grid_remove()
+
+    def _update_max_pa_state(self, *args):
+        """Update Max PA checkbox state based on Preanalysis setting"""
+        if self.preanalysis.get():
+            # Enable Max PA checkbox
+            self.max_pa_checkbox.configure(state="normal")
+        else:
+            # Disable Max PA checkbox and uncheck it
+            self.max_pa.set(False)
+            self.max_pa_checkbox.configure(state="disabled")
 
     def _toggle_videosr_options(self):
         if self.enable_videosr.get():

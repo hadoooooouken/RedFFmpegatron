@@ -1,0 +1,376 @@
+#ADVANCED ENCODER SETTINGS
+
+#Usage
+transcoding, ultralowlatency, lowlatency, webcam, high_quality, lowlatency_high_quality
+
+Controls the encoding mode optimized for different use cases:
+
+transcoding = General purpose transcoding (default)
+ultralowlatency = Ultra low latency for real-time applications
+lowlatency = Low latency for streaming
+webcam = Optimized for webcam capture
+high_quality = Maximum quality encoding
+lowlatency_high_quality = Balanced low latency with quality
+
+#Quality Preset
+speed, balanced, quality
+
+Controls the encoding speed vs. quality trade-off:
+
+speed = Fastest encoding (lower quality)
+balanced = Balanced speed and quality (default)
+quality = Highest quality encoding (slower)
+
+#Profile
+main, main10 (HEVC/AV1)
+main, high, constrained_baseline, constrained_high (H.264)
+
+Sets the encoding profile which determines supported features:
+
+main = Standard profile (good compatibility)
+main10 = 10-bit color depth (HDR support)
+high = High profile (better compression)
+constrained_baseline = Most compatible H.264 profile
+constrained_high = High profile with constraints
+
+#Level
+auto, 1.0-6.2 (H.264/HEVC), 2.0-7.3 (AV1)
+
+Specifies the maximum capabilities of the decoder:
+Higher levels support higher resolutions, bitrates, and processing requirements
+"auto" lets FFmpeg automatically determine the appropriate level
+
+#Tier
+0 (Main), 1 (High) - HEVC/AV1 only
+
+Controls the tier within a given level:
+
+Main Tier (0) = For most consumer applications
+High Tier (1) = For professional broadcasting (higher bitrates)
+
+#Coder
+default, auto, cabac, cavlc, ac, vlc - H.264 only
+
+Selects entropy encoding method:
+
+cabac = Context-Adaptive Binary Arithmetic Coding (better compression)
+cavlc = Context-Adaptive Variable-Length Coding (faster decoding)
+Default: cabac for best compression efficiency
+
+#Rate-Control
+vbr_latency, vbr_peak, cbr, qvbr, hqvbr, hqcbr, cqp
+
+Selects rate control method:
+
+vbr_latency = Variable Bitrate optimized for latency
+vbr_peak = Variable Bitrate with peak constraint
+cbr = Constant Bitrate (consistent bandwidth usage)
+qvbr = Quality-based Variable Bitrate
+hqvbr = High Quality Variable Bitrate
+hqcbr = High Quality Constant Bitrate
+cqp = Constant Quantization Parameter (quality-based)
+
+#HW Accel
+auto, amf, d3d11va, dxva2
+
+Selects hardware acceleration method:
+
+auto = Automatic detection
+amf = AMD Advanced Media Framework (recommended for AMD GPUs)
+d3d11va = DirectX 11 Video Acceleration
+dxva2 = DirectX Video Acceleration 2.0
+
+#VBAQ (Visual Quality Enhancement)
+Enabled/Disabled
+
+Enables perceptual quality optimization:
+Improves subjective visual quality by allocating more bits to complex areas
+Recommended: Enabled for most content
+
+#Preencode
+Enabled/Disabled
+
+Enables pre-analysis of frames before encoding:
+Can improve quality but increases encoding time
+Useful for high-quality encodes where speed is less critical
+
+#Preanalysis
+Enabled/Disabled
+
+Enables advanced pre-analysis for better rate control:
+Analyzes video content to optimize bit allocation
+Significantly improves quality but increases encoding time
+
+#Max PA (Maximum Preanalysis)
+Enabled/Disabled (only when Preanalysis enabled)
+
+Enables comprehensive pre-analysis features:
+
+Scene change detection
+Static scene detection
+Adaptive quantization
+Frame complexity analysis
+
+Provides highest quality but substantially increases encoding time
+
+#Smart Access Video
+Enabled/Disabled
+
+Enables AMD Smart Access Video technology:
+Allows better communication between CPU and GPU components
+Can improve encoding efficiency and quality on supported systems
+
+#Constant QP Mode
+Enabled/Disabled
+
+Switches between bitrate-based and quality-based encoding:
+
+Disabled = Use bitrate-based encoding (VBR/CBR)
+Enabled = Use constant quantization parameter (quality-based)
+CQP provides consistent quality but variable file size
+
+#QVBR Quality Level
+1-51
+
+Sets quality level for QVBR rate control mode:
+Lower values = better quality (23-28 recommended for high quality)
+Higher values = lower quality (30-35 for acceptable quality)
+
+Only available when using QVBR or hqvbr rate control
+
+#FPS AND SCALING SETTINGS
+
+#FPS Options
+source, 60, 50, 30, 23.976, custom
+
+Controls the output frame rate:
+
+source = Maintain original frame rate
+60 = 60 frames per second (smooth motion)
+50 = 50 frames per second (PAL regions)
+30 = 30 frames per second (standard video)
+23.976 = 24p cinematic look (24/1.001)
+custom = Manually specify any frame rate value
+
+#Video Format
+source, HD, FHD, QHD, 4K, custom
+
+Controls output resolution scaling:
+
+source = Maintain original resolution
+HD = 1280x720 (720p)
+FHD = 1920x1080 (1080p)
+QHD = 2560x1440 (1440p)
+4K = 3840x2160 (2160p)
+custom = Manually specify output width (height scales proportionally)
+
+#Interpolation Algorithm
+bilinear, bicubic, neighbor, area, lanczos, spline
+
+Selects the scaling algorithm for resolution changes:
+
+bilinear = Fast, low-quality scaling
+bicubic = Smooth and balanced quality (default)
+neighbor = Blocky, pixelated output (fastest)
+area = Soft result ideal for downscaling
+lanczos = Sharp and high-quality scaling
+spline = Visually best in theory (slowest)
+
+#VideoSR
+Enabled/Disabled
+
+Enables AMD's Video Super Resolution technology:
+Uses AI-powered upscaling for improved image quality
+Available on AMD Radeon RX 7000 series and newer GPUs
+Provides better detail preservation than traditional scaling
+
+#VideoSR Algorithm
+sr1-0, sr1-1, bilinear, bicubic, point
+
+Selects the super resolution algorithm:
+
+sr1-0 = First generation AI upscaling
+sr1-1 = Enhanced AI upscaling (recommended)
+bilinear = Fallback to traditional bilinear
+bicubic = Fallback to traditional bicubic
+point = Nearest neighbor fallback
+
+#VideoSR Sharpness
+-1 to 2.0
+
+Controls the sharpness level for AI upscaling:
+
+-1 = Automatic sharpness adjustment
+0.0 = Minimum sharpness (softer image)
+1.0 = Default sharpness
+2.0 = Maximum sharpness (may introduce artifacts)
+
+#VideoSR Keep Aspect Ratio
+Enabled/Disabled
+
+Maintains original aspect ratio during upscaling:
+
+Enabled = Preserve aspect ratio (may add letterboxing)
+Disabled = Stretch to fill target resolution
+
+#VideoSR Fill
+Enabled/Disabled
+
+Controls how the image fills the target resolution:
+
+Enabled = Zoom and crop to fill frame completely
+Disabled = Maintain original composition with possible letterboxing
+
+#VideoSR Pixel Format
+rgb24, yuv444p, rgba, same
+
+Selects the pixel format for processed video:
+
+rgb24 = 8-bit RGB (standard compatibility)
+yuv444p = Full chroma resolution (better color quality)
+rgba = RGB with alpha channel (for transparency)
+same = Maintain original pixel format
+
+#AUDIO SETTINGS
+
+#Audio Options
+disable, source, AAC 96k, AAC 160k, AAC 256k, custom
+
+Controls audio processing and encoding:
+
+disable = Remove audio track completely
+source = Copy original audio without re-encoding (fastest)
+AAC 96k = Encode to AAC at 96 kbps (small file size)
+AAC 160k = Encode to AAC at 160 kbps (good balance)
+AAC 256k = Encode to AAC at 256 kbps (high quality)
+custom = Manually specify bitrate in kbps
+
+#Audio Bitrate Quality Guide
+96k = Acceptable quality for speech podcasts
+160k = Good quality for music and general content
+256k = High quality, transparent for most listeners
+320k = Maximum AAC quality (near transparent)
+
+#ADDITIONAL OPTIONS BUTTONS
+
+#Speed up X2
+setpts=0.5*PTS
+
+Doubles video playback speed (2x faster) by modifying presentation timestamps.
+Values <1.0 speed up, >1.0 slow down.
+
+atempo=2.0
+Doubles audio playback speed (2x faster) without changing pitch.
+atempo supports 0.5–2.0. For larger changes, chain filters (e.g., atempo=2.0,atempo=2.0 for 4x).
+
+#Slow down X2
+setpts=2.0*PTS
+
+Halves video playback speed (2x slower)..
+
+atempo=2.0
+Halves audio playback speed (2x slower).
+
+#Sharpness
+unsharp=5:5:1.15:3:3:0.0
+
+Enhances image sharpness using unsharp mask.
+Format: luma_msize_x:luma_msize_y:luma_amount:chroma_msize_x:chroma_msize_y:chroma_amount.
+Higher values increase sharpness but may produce halos.
+
+#Saturation
+eq=saturation=1.15
+
+Adjusts saturation.
+1.0 = original, >1.0 = more saturated, <1.0 = desaturated.
+Range: 0.0–3.0.
+
+#Denoise
+hqdn3d=2:1.5:3:2.25
+
+High-quality temporal + spatial denoise filter.
+Format: luma_spatial:chroma_spatial:luma_tmp:chroma_tmp.
+Optional: increase temporal params for very noisy video.
+
+luma_spatial
+    A non-negative floating point number which specifies spatial luma strength. It defaults to 4.0.
+chroma_spatial
+    A non-negative floating point number which specifies spatial chroma strength. It defaults to 3.0*luma_spatial/4.0.
+luma_tmp
+    A floating point number which specifies luma temporal strength. It defaults to 6.0*luma_spatial/4.0.
+chroma_tmp
+    A floating point number which specifies chroma temporal strength. It defaults to luma_tmp*chroma_spatial/luma_spatial. 
+
+#FPS Pass
+fps_mode passthrough
+
+Preserve original frame timestamps and pacing.
+Useful when you want to maintain the original variable frame rate characteristics.
+
+#Drop thresh
+frame_drop_threshold 0.5
+
+Determines how aggressively frames may be dropped to maintain quality.
+Range: 0–1; higher = more likely to drop frames.
+
+#Gamma RGB
+eq=gamma_r=1.0:gamma_g=1.0:gamma_b=1.0:gamma_weight=1.0
+
+Adjust gamma correction for each color channel separately.
+Values >1.0 make image brighter, <1.0 make image darker.
+
+#Brightness
+eq=brightness=-0.15
+
+Adjust brightness of the video.
+Values range from -1.0 to 1.0. Negative values darken, positive values brighten.
+
+#Audio fix
+loudnorm=I=-16:TP=-1.5:LRA=11
+
+Normalize audio loudness using EBU R128 standards.
+
+I: Integrated loudness target (-16 to -24 LUFS)
+TP: True peak maximum (-1.5 to -9.0 dBTP)
+LRA: Loudness range (1.0 to 20.0 LU)
+
+#Force 8 bit
+pix_fmt:v nv12
+
+Force 8-bit color depth with NV12 pixel format.
+
+#Force 10 bit
+pix_fmt:v p010le
+
+Force 10-bit color depth with P010LE pixel format.
+Better for HDR content and reduces banding, but less compatible.
+
+#HDR to SDR
+zscale=transfer=linear:npl=100,tonemap=tonemap=hable:desat=0,zscale=transfer=bt709:matrix=bt709:primaries=bt709
+
+Convert HDR content to SDR using tonemapping.
+
+The three-stage process:
+
+1. Convert to linear light with specified peak luminance (npl)
+2. Apply Hable tonemapping algorithm with zero desaturation (desat=0)
+3. Convert to BT.709 color space for proper SDR compatibility
+
+This maintains color accuracy and prevents the muted/muddy colors typical of poor HDR conversions.
+
+#Crop to 16:9
+crop=iw:min(ih\,iw*9/16):0:(ih-min(ih\,iw*9/16))/2
+
+Crops video to 16:9 by trimming vertical edges only, keeping full original width.
+
+#Rotate
+transpose=1
+
+Rotate video 90 degrees clockwise.
+
+The transpose filter accepts the values from 0-3:
+
+    0 = 90° counter-clockwise and vertical flip
+    1 = 90° clockwise
+    2 = 90° counter-clockwise
+    3 = 90° clockwise and vertical flip
