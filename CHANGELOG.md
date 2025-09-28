@@ -1,4 +1,9 @@
 # RedFFmpegatron - Changelog
+## [1.0.5] - 2025-09-29
+- UI improvements;
+- Help file updated;
+- Auto Button - Resets all encoder settings to automatic (auto) values and disables all checkboxes (custom settings);
+- Clean output of the ffmpeg command if no custom settings are used.
 
 ## [1.0.4] - 2025-09-23
 - UI improvements;

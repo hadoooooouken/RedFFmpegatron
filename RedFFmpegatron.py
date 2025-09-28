@@ -145,7 +145,7 @@ class VideoConverterApp:
         self.preview_job = None  # used for debouncing preview creation
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.0.4")
+        master.title("RedFFmpegatron 1.0.5")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -166,6 +166,7 @@ class VideoConverterApp:
 
         self._setup_variables()
         self._create_widgets()
+        self._update_codec_settings()
         self._toggle_constant_qp_mode()  # Enabled CQP by default
 
         # Find FFmpeg executables (critical dependency)
@@ -278,21 +279,31 @@ class VideoConverterApp:
             messagebox.showerror("Error", f"Streamcopy failed: {e}")
             return
 
-        # Build encoding command with current settings (without trimming)
+        # Build encoding command
         try:
-            # Save original values
-            original_input = self.input_file.get()
-            original_output = self.output_file.get()
+            # if custom command exist
+            if self.custom_command is not None:
+                encode_cmd = self.custom_command.copy()
+                try:
+                    i_index = encode_cmd.index("-i")
+                    if i_index + 1 < len(encode_cmd):
+                        encode_cmd[i_index + 1] = temp_streamcopy
+                except ValueError:
+                    encode_cmd.extend(["-i", temp_streamcopy])
 
-            # Temporarily substitute values to build the command
-            self.input_file.set(temp_streamcopy)
-            self.output_file.set(temp_encoded)
+                if len(encode_cmd) > 0:
+                    encode_cmd[-1] = temp_encoded
+            else:
+                original_input = self.input_file.get()
+                original_output = self.output_file.get()
 
-            encode_cmd = self._build_ffmpeg_command(preview=True)
+                self.input_file.set(temp_streamcopy)
+                self.output_file.set(temp_encoded)
 
-            # Restore original values
-            self.input_file.set(original_input)
-            self.output_file.set(original_output)
+                encode_cmd = self._build_ffmpeg_command(preview=True)
+
+                self.input_file.set(original_input)
+                self.output_file.set(original_output)
 
             # Start preview encoding with progress
             self.is_creating_preview = True
@@ -387,13 +398,15 @@ class VideoConverterApp:
         self.custom_abitrate = ctk.StringVar(value="160")
         self.enable_audio_options = ctk.BooleanVar(value=False)
         self.enable_encoder_options = ctk.BooleanVar(value=False)
+        self.threads = ctk.StringVar(value="4")
+        self.async_depth = ctk.StringVar(value="auto")
         self.preset = ctk.StringVar(value="balanced")
-        self.tune = ctk.StringVar(value="hq")
-        self.profile = ctk.StringVar(value="main")
+        self.profile = ctk.StringVar(value="auto")
+        self.profile_tier = ctk.StringVar(value="high")
         self.level = ctk.StringVar(value="auto")
-        self.tier = ctk.StringVar(value="1")
-        self.rc = ctk.StringVar(value="hqcbr")
+        self.rc = ctk.StringVar(value="hqvbr")
         self.rc.trace_add("write", self._update_rate_control_settings)
+        self.rc_locked = ctk.BooleanVar(value=False)
         self.hwaccel = ctk.StringVar(value="amf")
         self.enable_fps_scale_options = ctk.BooleanVar(value=False)
         self.fps_option = ctk.StringVar(value="source")
@@ -437,7 +450,7 @@ class VideoConverterApp:
         self.preanalysis.trace_add("write", lambda *args: self._update_max_pa_state())
         self.smart_access_video = ctk.BooleanVar(value=False)
         self.enable_videosr = ctk.BooleanVar(value=False)
-        self.videosr_algorithm = ctk.StringVar(value="sr1-1")
+        self.videosr_algorithm = ctk.StringVar(value="2")
         self.videosr_sharpness = ctk.StringVar(value="-1")
         self.videosr_keep_ratio = ctk.BooleanVar(value=False)
         self.videosr_fill = ctk.BooleanVar(value=False)
@@ -448,6 +461,7 @@ class VideoConverterApp:
             "write", lambda *args: self._calculate_estimated_size()
         )
         self.is_creating_preview = False
+        self.custom_command = None
 
     def _setup_keyboard_shortcuts(self):
         self.master.bind_all("<Control-KeyPress>", self._handle_key_press)
@@ -625,16 +639,6 @@ class VideoConverterApp:
         )
         self.constant_qp_checkbox.pack(side="left", padx=(10, 0))
 
-        # Quality Level label and entry (hidden by default)
-        self.quality_level_label = ctk.CTkLabel(bitrate_frame, text="Quality Level:")
-        self.quality_level_entry = ctk.CTkEntry(
-            bitrate_frame,
-            textvariable=self.quality_level,
-            width=80,
-            fg_color=SECONDARY_BG,
-            text_color=TEXT_COLOR_W,
-        )
-
         ctk.CTkButton(
             main_frame,
             text="Output",
@@ -704,6 +708,19 @@ class VideoConverterApp:
         )
         encoder_options_frame_toggle.grid(row=5, column=0, sticky="w", padx=10, pady=5)
 
+        # Auto button
+        self.auto_button = ctk.CTkButton(
+            main_frame,
+            text="Auto",
+            command=self._apply_auto_encoder_settings,
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+            text_color=TEXT_COLOR_B,
+            width=80,
+        )
+        self.auto_button.grid(row=5, column=1, sticky="w", padx=5, pady=5)
+        self.auto_button.grid_remove()
+
         self.encoder_options_frame = ctk.CTkFrame(main_frame, fg_color=SECONDARY_BG)
 
         left_column_frame = ctk.CTkFrame(
@@ -721,6 +738,7 @@ class VideoConverterApp:
             left_column_frame,
             variable=self.usage,
             values=[
+                "auto",
                 "transcoding",
                 "ultralowlatency",
                 "lowlatency",
@@ -737,13 +755,15 @@ class VideoConverterApp:
         usage_option_menu.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
 
         # Preset (quality)
-        ctk.CTkLabel(left_column_frame, text="Quality Preset:").grid(
+        ctk.CTkLabel(left_column_frame, text="Preset:").grid(
             row=1, column=0, sticky="w", padx=5, pady=2
         )
+        preset_values = ["auto", "speed", "balanced", "quality"]
+
         preset_option_menu = ctk.CTkOptionMenu(
             left_column_frame,
             variable=self.preset,
-            values=["speed", "balanced", "quality"],
+            values=preset_values,
             fg_color=PRIMARY_BG,
             button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
@@ -751,15 +771,28 @@ class VideoConverterApp:
             dropdown_hover_color=ACCENT_RED,
         )
         preset_option_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+        self.preset_option_menu = preset_option_menu
 
         # Profile
+        self.profile_values = {
+            "hevc_amf": ["auto", "main", "high"],
+            "h264_amf": [
+                "auto",
+                "main",
+                "high",
+                "constrained_baseline",
+                "constrained_high",
+            ],
+            "av1_amf": ["auto", "main"],
+        }
+
         ctk.CTkLabel(left_column_frame, text="Profile:").grid(
             row=2, column=0, sticky="w", padx=5, pady=2
         )
         profile_option_menu = ctk.CTkOptionMenu(
             left_column_frame,
             variable=self.profile,
-            values=["main", "main10"],
+            values=self.profile_values["hevc_amf"],
             fg_color=PRIMARY_BG,
             button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
@@ -767,6 +800,18 @@ class VideoConverterApp:
             dropdown_hover_color=ACCENT_RED,
         )
         profile_option_menu.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
+
+        def update_profile_values(*args):
+            codec = self.video_codec.get()
+            key = f"{codec}_amf"
+            values = self.profile_values.get(key, ["auto"])
+            self.profile_option_menu.configure(values=values)
+
+            if self.profile.get() not in values:
+                self.profile.set(values[0])
+
+        self.video_codec.trace_add("write", update_profile_values)
+        self.profile_option_menu = profile_option_menu
 
         # Level
         ctk.CTkLabel(left_column_frame, text="Level:").grid(
@@ -798,34 +843,36 @@ class VideoConverterApp:
             dropdown_hover_color=ACCENT_RED,
         )
         level_option_menu.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
+        self.level_option_menu = level_option_menu
 
-        # Tier Label (for HEVC and AV1)
-        self.tier_label = ctk.CTkLabel(left_column_frame, text="Tier:")
-        self.tier_label.grid(row=4, column=0, sticky="w", padx=5, pady=2)
+        # Profile Tier (only for HEVC)
+        self.profile_tier_label = ctk.CTkLabel(left_column_frame, text="Tier:")
+        self.profile_tier_label.grid(row=4, column=0, sticky="w", padx=5, pady=2)
+        self.profile_tier_label.grid_remove()  # hide by default
 
-        # Tier OptionMenu
-        self.tier_option_menu = ctk.CTkOptionMenu(
+        self.profile_tier_option_menu = ctk.CTkOptionMenu(
             left_column_frame,
-            variable=self.tier,
-            values=["0", "1"],
+            variable=self.profile_tier,
+            values=["auto", "main", "high"],
             fg_color=PRIMARY_BG,
             button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
             dropdown_hover_color=ACCENT_RED,
         )
-        self.tier_option_menu.grid(row=4, column=1, sticky="ew", padx=5, pady=2)
+        self.profile_tier_option_menu.grid(row=4, column=1, sticky="ew", padx=5, pady=2)
+        self.profile_tier_option_menu.grid_remove()  # hide by default
 
         # Coder Label (only for H.264)
         self.coder_label = ctk.CTkLabel(left_column_frame, text="Coder:")
         self.coder_label.grid(row=4, column=0, sticky="w", padx=5, pady=2)
         self.coder_label.grid_remove()  # hide by default
 
-        # Coder OptionMenu
+        # Coder Option Menu
         self.coder_option_menu = ctk.CTkOptionMenu(
             left_column_frame,
             variable=self.coder,
-            values=["default", "auto", "cabac", "cavlc", "ac", "vlc"],
+            values=["auto", "cabac", "cavlc"],
             fg_color=PRIMARY_BG,
             button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
@@ -842,24 +889,21 @@ class VideoConverterApp:
             row=1, column=2, columnspan=2, padx=5, pady=5, sticky="nsew"
         )
 
-        self.profile_option_menu = profile_option_menu
-        self.level_option_menu = level_option_menu
-
-        # Rate-Control
-        ctk.CTkLabel(right_column_frame, text="Rate-Control:").grid(
+        # FF Threads
+        ctk.CTkLabel(right_column_frame, text="FF Threads:").grid(
             row=0, column=0, sticky="w", padx=5, pady=2
         )
-        rc_option_menu = ctk.CTkOptionMenu(
+        preset_option_menu = ctk.CTkOptionMenu(
             right_column_frame,
-            variable=self.rc,
-            values=["vbr_latency", "vbr_peak", "cbr", "qvbr", "hqvbr", "hqcbr"],
+            variable=self.threads,
+            values=["auto"] + [str(i) for i in range(1, 17)],
             fg_color=PRIMARY_BG,
             button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
             dropdown_fg_color=SECONDARY_BG,
             dropdown_hover_color=ACCENT_RED,
         )
-        rc_option_menu.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
+        preset_option_menu.grid(row=0, column=1, sticky="w", padx=5, pady=2)
 
         # HW Accel
         ctk.CTkLabel(right_column_frame, text="HW Accel:").grid(
@@ -877,22 +921,55 @@ class VideoConverterApp:
         )
         hwaccel_option_menu.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
 
+        # Async Depth
+        ctk.CTkLabel(right_column_frame, text="Async Depth:").grid(
+            row=2, column=0, sticky="w", padx=5, pady=2
+        )
+        async_depth_option_menu = ctk.CTkOptionMenu(
+            right_column_frame,
+            variable=self.async_depth,
+            values=["auto"] + [str(i) for i in range(1, 17)],
+            fg_color=PRIMARY_BG,
+            button_color=ACCENT_RED,
+            button_hover_color=HOVER_RED,
+            dropdown_fg_color=SECONDARY_BG,
+            dropdown_hover_color=ACCENT_RED,
+        )
+        async_depth_option_menu.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
+        self.async_depth_option_menu = async_depth_option_menu
+
+        # Rate Control
+        ctk.CTkLabel(right_column_frame, text="Rate Control:").grid(
+            row=3, column=0, sticky="w", padx=5, pady=2
+        )
+        self.rc_option_menu = ctk.CTkOptionMenu(
+            right_column_frame,
+            variable=self.rc,
+            values=["vbr_latency", "vbr_peak", "cbr", "qvbr", "hqvbr", "hqcbr"],
+            fg_color=PRIMARY_BG,
+            button_color=ACCENT_RED,
+            button_hover_color=HOVER_RED,
+            dropdown_fg_color=SECONDARY_BG,
+            dropdown_hover_color=ACCENT_RED,
+        )
+        self.rc_option_menu.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
+
         # QVBR Quality Label
         self.qvbr_quality_level_label = ctk.CTkLabel(
             right_column_frame, text="QVBR Quality:"
         )
-        self.qvbr_quality_level_label.grid(row=2, column=0, sticky="w", padx=5, pady=2)
+        self.qvbr_quality_level_label.grid(row=4, column=0, sticky="w", padx=5, pady=2)
         self.qvbr_quality_level_label.grid_remove()
 
         # QVBR Quality Entry
         self.qvbr_quality_level_entry = ctk.CTkEntry(
             right_column_frame,
             textvariable=ctk.StringVar(value="23"),  # Default QVBR quality
-            width=80,
+            width=50,
             fg_color=SECONDARY_BG,
             text_color=TEXT_COLOR_W,
         )
-        self.qvbr_quality_level_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
+        self.qvbr_quality_level_entry.grid(row=4, column=1, sticky="w", padx=5, pady=2)
         self.qvbr_quality_level_entry.grid_remove()
 
         # Checkboxes for AMF specific features
@@ -902,7 +979,7 @@ class VideoConverterApp:
             variable=self.vbaq,
             fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
-        ).grid(row=0, column=2, columnspan=2, sticky="w", padx=5, pady=2)
+        ).grid(row=0, column=2, columnspan=2, sticky="w", padx=15, pady=2)
 
         ctk.CTkCheckBox(
             right_column_frame,
@@ -910,7 +987,7 @@ class VideoConverterApp:
             variable=self.preencode,
             fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
-        ).grid(row=1, column=2, columnspan=2, sticky="w", padx=5, pady=2)
+        ).grid(row=1, column=2, columnspan=2, sticky="w", padx=15, pady=2)
 
         ctk.CTkCheckBox(
             right_column_frame,
@@ -918,7 +995,7 @@ class VideoConverterApp:
             variable=self.preanalysis,
             fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
-        ).grid(row=2, column=2, columnspan=2, sticky="w", padx=5, pady=2)
+        ).grid(row=2, column=2, columnspan=2, sticky="w", padx=15, pady=2)
 
         self.max_pa_checkbox = ctk.CTkCheckBox(
             right_column_frame,
@@ -928,7 +1005,7 @@ class VideoConverterApp:
             hover_color=HOVER_RED,
         )
         self.max_pa_checkbox.grid(
-            row=3, column=2, columnspan=2, sticky="w", padx=5, pady=2
+            row=3, column=2, columnspan=2, sticky="w", padx=15, pady=2
         )
         self._update_max_pa_state()
 
@@ -938,7 +1015,7 @@ class VideoConverterApp:
             variable=self.smart_access_video,
             fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
-        ).grid(row=4, column=2, columnspan=2, sticky="w", padx=5, pady=2)
+        ).grid(row=4, column=2, columnspan=2, sticky="w", padx=15, pady=2)
 
         # FPS and Scaling
         fps_scale_frame_toggle = ctk.CTkCheckBox(
@@ -1102,7 +1179,18 @@ class VideoConverterApp:
         videosr_algo_menu = ctk.CTkOptionMenu(
             self.videosr_options_frame,
             variable=self.videosr_algorithm,
-            values=["sr1-0", "sr1-1", "bilinear", "bicubic", "point"],
+            values=[
+                "0",
+                "1",
+                "2",
+                "3",
+                "4",
+                "bilinear",
+                "bicubic",
+                "sr1-0",
+                "point",
+                "sr1-1",
+            ],
             fg_color=PRIMARY_BG,
             button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
@@ -1130,7 +1218,7 @@ class VideoConverterApp:
         videosr_pixel_format_menu = ctk.CTkOptionMenu(
             self.videosr_options_frame,
             variable=self.videosr_pixel_format,
-            values=["rgb24", "yuv444p", "rgba", "same"],
+            values=["same", "nv12", "yuv420p", "rgb24", "yuv444p", "rgba"],
             fg_color=PRIMARY_BG,
             button_color=ACCENT_RED,
             button_hover_color=HOVER_RED,
@@ -1230,7 +1318,7 @@ class VideoConverterApp:
 
         # Options
         ctk.CTkLabel(self.additional_options_frame, text="Add FF Options:").grid(
-            row=1, column=0, sticky="w", padx=10, pady=10
+            row=3, column=0, sticky="w", padx=10, pady=10
         )
         self.additional_options_entry = ctk.CTkEntry(
             self.additional_options_frame,
@@ -1239,7 +1327,7 @@ class VideoConverterApp:
             fg_color=SECONDARY_BG,
             text_color=TEXT_COLOR_W,
         )
-        self.additional_options_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+        self.additional_options_entry.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
         self.additional_options_entry.insert(0, self.additional_options_placeholder)
         self.additional_options_entry.configure(text_color=PLACEHOLDER_COLOR)
         self.additional_options_entry.bind("<FocusIn>", self._on_options_entry_focus_in)
@@ -1251,8 +1339,11 @@ class VideoConverterApp:
             self.additional_options_frame,
             text="?",
             width=30,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
             command=lambda: self._show_help_window("AMF Encoder Options", "encoder"),
-        ).grid(row=1, column=2, padx=(0, 10))
+        ).grid(row=3, column=2, padx=(0, 10))
 
         # Trimming controls
         trim_frame = ctk.CTkFrame(self.additional_options_frame, fg_color="transparent")
@@ -1350,6 +1441,9 @@ class VideoConverterApp:
             self.additional_options_frame,
             text="?",
             width=30,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
             command=lambda: self._show_help_window("FFmpeg Video Filters", "filters"),
         ).grid(row=4, column=2, padx=(0, 10))
 
@@ -1392,8 +1486,8 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Speed up X2",
             command=lambda: self._set_speed_filter("2.0"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1402,8 +1496,8 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Slow down X2",
             command=lambda: self._set_speed_filter("0.5"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1413,8 +1507,8 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Sharpness",
             command=lambda: self._add_video_filter("unsharp=5:5:1.15:3:3:0.0"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1424,8 +1518,8 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Saturation",
             command=lambda: self._add_video_filter("eq=saturation=1.15"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1435,8 +1529,8 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Denoise",
             command=lambda: self._add_video_filter("hqdn3d=2:1.5:3:2.25"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1446,8 +1540,8 @@ class VideoConverterApp:
             quick_buttons_frame,
             text="Clear",
             command=self._clear_all_filters,
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left")
@@ -1464,8 +1558,8 @@ class VideoConverterApp:
             quick_buttons_frame_2,
             text="FPS Pass",
             command=lambda: self._add_additional_option("-fps_mode passthrough"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1475,8 +1569,8 @@ class VideoConverterApp:
             quick_buttons_frame_2,
             text="Drop thresh",
             command=lambda: self._add_additional_option("-frame_drop_threshold 0.5"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1488,8 +1582,8 @@ class VideoConverterApp:
             command=lambda: self._add_video_filter(
                 "eq=gamma_r=1.0:gamma_g=1.0:gamma_b=1.0:gamma_weight=1.0"
             ),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1499,8 +1593,8 @@ class VideoConverterApp:
             quick_buttons_frame_2,
             text="Brightness",
             command=lambda: self._add_video_filter("eq=brightness=-0.15"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1510,8 +1604,8 @@ class VideoConverterApp:
             quick_buttons_frame_2,
             text="Audio fix",
             command=lambda: self._add_audio_filter("loudnorm=I=-16:TP=-1.5:LRA=11"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left")
@@ -1528,8 +1622,8 @@ class VideoConverterApp:
             quick_buttons_frame_3,
             text="Force 8 bit",
             command=lambda: self._add_additional_option("-pix_fmt:v nv12"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1539,8 +1633,8 @@ class VideoConverterApp:
             quick_buttons_frame_3,
             text="Force 10 bit",
             command=lambda: self._add_additional_option("-pix_fmt:v p010le"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1549,9 +1643,13 @@ class VideoConverterApp:
         ctk.CTkButton(
             quick_buttons_frame_3,
             text="HDR to SDR",
-            command=self._apply_hdr_to_sdr,
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            command=lambda: self._add_video_filter(
+                "zscale=transfer=linear:npl=100,"
+                "tonemap=tonemap=hable:desat=0,"
+                "zscale=transfer=bt709:matrix=bt709:primaries=bt709"
+            ),
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1561,10 +1659,10 @@ class VideoConverterApp:
             quick_buttons_frame_3,
             text="Crop to 16:9",
             command=lambda: self._add_video_filter(
-                "crop=iw:min(ih\,iw*9/16):0:(ih-min(ih\,iw*9/16))/2"
+                "crop=iw:min(ih\\,iw*9/16):0:(ih-min(ih\\,iw*9/16))/2"
             ),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left", padx=(0, 10))
@@ -1574,8 +1672,8 @@ class VideoConverterApp:
             quick_buttons_frame_3,
             text="Rotate",
             command=lambda: self._add_video_filter("transpose=1"),
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=100,
         ).pack(side="left")
@@ -1764,8 +1862,17 @@ class VideoConverterApp:
             # Disable regular rate control options
             self.rc.set("cqp")
 
+            # Disable Rate Control selection
+            self.rc_locked.set(True)
+            self.rc_option_menu.configure(
+                state="disabled", fg_color=ACCENT_GREY, button_color=ACCENT_GREY
+            )
+
             # Disable file size estimation
             self.estimated_file_size.set("Estimated size: Not available for CQP")
+
+            # Hide QVBR quality controls
+            self._update_rate_control_settings()
         else:
             # Switch back to normal mode - replace quality with bitrate
             self.bitrate_label.configure(text="Video Bitrate (k):")
@@ -1774,10 +1881,41 @@ class VideoConverterApp:
             self.bitrate_entry.insert(0, "6000")
 
             # Enable regular rate control
-            self.rc.set("hqcbr")
+            self.rc.set("hqvbr")
+
+            # Enable Rate Control selection
+            self.rc_locked.set(False)
+            self.rc_option_menu.configure(
+                state="normal", fg_color=PRIMARY_BG, button_color=ACCENT_RED
+            )
 
             # Enable file size estimation
             self._calculate_estimated_size()
+
+            # Update QVBR quality controls visibility
+            self._update_rate_control_settings()
+
+    def _apply_auto_encoder_settings(self):
+        """Set all option menus with 'auto' to auto and uncheck all checkboxes."""
+        for child in self.encoder_options_frame.winfo_children():
+            # Recursively go through subframes
+            for (
+                sub_child
+            ) in child.winfo_children():  # Renamed from 'sub' to 'sub_child'
+                # Option Menus
+                if isinstance(sub_child, ctk.CTkOptionMenu):
+                    try:
+                        if "auto" in sub_child._values:
+                            sub_child._variable.set("auto")
+                    except Exception:
+                        pass
+
+                # CheckBoxes
+                if isinstance(sub_child, ctk.CTkCheckBox):
+                    try:
+                        sub_child._variable.set(False)
+                    except Exception:
+                        pass
 
     def _show_output_command(self):
         if getattr(self, "output_window_open", False):
@@ -1787,6 +1925,7 @@ class VideoConverterApp:
 
         if not self.input_file.get():
             messagebox.showerror("Error", "Please select an input file first.")
+            self.output_window_open = False
             return
 
         try:
@@ -1848,6 +1987,16 @@ class VideoConverterApp:
 
             ctk.CTkButton(
                 button_frame,
+                text="Reset to Default",
+                command=self._reset_custom_command,
+                fg_color=ACCENT_GREY,
+                hover_color=HOVER_GREY,
+                text_color=TEXT_COLOR_B,
+                width=150,
+            ).pack(side="left", padx=5)
+
+            ctk.CTkButton(
+                button_frame,
                 text="Close",
                 command=on_close,
                 fg_color=ACCENT_GREY,
@@ -1858,6 +2007,7 @@ class VideoConverterApp:
 
         except Exception as e:
             messagebox.showerror("Error", f"Could not generate command: {str(e)}")
+            self.output_window_open = False
 
     def _copy_command_to_clipboard(self):
         command = self.command_textbox.get("1.0", "end-1c")
@@ -1936,7 +2086,7 @@ class VideoConverterApp:
             return
 
         try:
-            args = split(new_command)
+            args = split(new_command, posix=False)
 
             if len(args) < 3:
                 raise ValueError("Command too short - not a valid FFmpeg command")
@@ -1954,7 +2104,9 @@ class VideoConverterApp:
             if not has_output:
                 raise ValueError("Missing output file")
 
+            self.custom_command = args
             self.ffmpeg_output.set("Custom command applied: " + " ".join(args))
+            self.output_window_open = False
             window.destroy()
 
         except Exception as e:
@@ -1966,7 +2118,30 @@ class VideoConverterApp:
                 "3. Valid FFmpeg arguments",
             )
 
+    def _reset_custom_command(self):
+        self.custom_command = None
+        self.ffmpeg_output.set("Custom command cleared – GUI settings are active again")
+        messagebox.showinfo(
+            "Reset", "Custom command has been cleared.\nGUI settings are now active."
+        )
+
     def _build_ffmpeg_command(self, preview=False):
+        if self.custom_command is not None:
+            if preview:
+                command = self.custom_command.copy()
+                try:
+                    i_index = command.index("-i")
+                    if i_index + 1 < len(command):
+                        command[i_index + 1] = self.input_file.get()
+                except ValueError:
+                    pass
+
+                if len(command) > 0:
+                    command[-1] = self.output_file.get()
+                return command
+            else:
+                return self.custom_command
+
         # Use custom path if specified, otherwise use found path
         ffmpeg_path = (
             self.ffmpeg_custom_path.get()
@@ -1986,16 +2161,21 @@ class VideoConverterApp:
             raise ValueError("Please fill in all main fields.")
 
         # Basic command structure
-        command = [
-            ffmpeg_path,
-            "-hwaccel",
-            self.hwaccel.get(),
-            "-threads",
-            "4",
-            "-y",
-            "-i",
-            input_f,
-        ]
+        command = [ffmpeg_path]
+
+        if self.hwaccel.get() != "auto":
+            command.extend(["-hwaccel:v", self.hwaccel.get()])
+
+        if self.threads.get() != "auto":
+            command.extend(["-threads", self.threads.get()])
+
+        command.extend(
+            [
+                "-y",
+                "-i",
+                input_f,
+            ]
+        )
 
         # Handle Streamcopy option
         if self.trim_streamcopy.get() and not preview:
@@ -2096,67 +2276,73 @@ class VideoConverterApp:
             command.extend(["-vf", ",".join(vf_filters)])
 
         # AMF encoder specific settings
-        command.extend(
-            [
-                "-c:v",
-                (
-                    "hevc_amf"
-                    if self.video_codec.get() == "hevc"
-                    else "av1_amf"
-                    if self.video_codec.get() == "av1"
-                    else "h264_amf"
-                ),
-                "-usage",
-                self.usage.get(),
-                "-quality",
-                self.preset.get(),
-                "-profile:v",
-                self.profile.get(),
-                "-level:v",
-                self.level.get(),
-                "-preencode:v",
-                "1" if self.preencode.get() else "0",
-                "-vbaq:v",
-                "1" if self.vbaq.get() else "0",
-                "-smart_access_video:v",
-                "1" if self.smart_access_video.get() else "0",
-            ]
-        )
+        codec_map = {"hevc": "hevc_amf", "av1": "av1_amf"}
+        command.extend(["-c:v", codec_map.get(self.video_codec.get(), "h264_amf")])
+
+        if self.usage.get() != "auto":
+            command.extend(["-usage:v", self.usage.get()])
+
+        if self.preset.get() != "auto":
+            command.extend(["-preset:v", self.preset.get()])
+
+        if self.profile.get() != "auto":
+            codec = self.video_codec.get()
+            if codec in ["hevc", "hevc_amf"]:
+                command.extend(["-profile:v", self.profile.get()])
+            else:
+                command.extend(["-profile:v", self.profile.get()])
+
+        if self.video_codec.get() == "hevc" and self.profile_tier.get() != "auto":
+            command.extend(["-profile_tier:v", self.profile_tier.get()])
+
+        if self.video_codec.get() == "h264" and self.coder.get() != "auto":
+            command.extend(["-coder:v", self.coder.get()])
+
+        if self.level.get() != "auto":
+            command.extend(["-level:v", self.level.get()])
+
+        if self.preencode.get():
+            command.extend(["-preencode:v", "1"])
+
+        if self.vbaq.get():
+            command.extend(["-vbaq:v", "1"])
+
+        if self.smart_access_video.get():
+            command.extend(["-smart_access_video:v", "1"])
+
+        if self.async_depth.get() != "auto":
+            command.extend(["-async_depth:v", self.async_depth.get()])
 
         # Preanalysis and Max PA options
-        command.extend(["-preanalysis:v", "1" if self.preanalysis.get() else "0"])
-        if self.preanalysis.get() and self.max_pa.get():
-            command.extend(
-                [
-                    "-pa_activity_type",
-                    "yuv",
-                    "-pa_scene_change_detection_enable",
-                    "1",
-                    "-pa_scene_change_detection_sensitivity",
-                    "high",
-                    "-pa_static_scene_detection_enable",
-                    "1",
-                    "-pa_static_scene_detection_sensitivity",
-                    "high",
-                    "-pa_caq_strength",
-                    "high",
-                    "-pa_frame_sad_enable",
-                    "1",
-                    "-pa_ltr_enable",
-                    "1",
-                    "-pa_paq_mode",
-                    "caq",
-                    "-pa_taq_mode",
-                    "2",
-                    "-pa_high_motion_quality_boost_mode",
-                    "1",
-                    "-pa_adaptive_mini_gop",
-                    "1",
-                ]
-            )
-
-        if self.video_codec.get() in ("hevc", "av1"):
-            command.extend(["-profile_tier:v", self.tier.get()])
+        if self.preanalysis.get():
+            command.extend(["-preanalysis:v", "1"])
+            if self.max_pa.get():
+                command.extend(
+                    [
+                        "-pa_activity_type",
+                        "yuv",
+                        "-pa_scene_change_detection_enable",
+                        "1",
+                        "-pa_scene_change_detection_sensitivity",
+                        "high",
+                        "-pa_static_scene_detection_enable",
+                        "1",
+                        "-pa_static_scene_detection_sensitivity",
+                        "high",
+                        "-pa_caq_strength",
+                        "high",
+                        "-pa_frame_sad_enable",
+                        "1",
+                        "-pa_ltr_enable",
+                        "1",
+                        "-pa_paq_mode",
+                        "caq",
+                        "-pa_taq_mode",
+                        "2",
+                        "-pa_high_motion_quality_boost_mode",
+                        "1",
+                    ]
+                )
 
         # Rate control settings
         if self.constant_qp_mode.get():
@@ -2192,9 +2378,11 @@ class VideoConverterApp:
         if self.rc.get() in ("qvbr", "hqvbr"):
             try:
                 qvbr_quality_level = int(self.qvbr_quality_level_entry.get())
+                if not (1 <= qvbr_quality_level <= 51):
+                    raise ValueError("QVBR quality must be a number between 1 and 51")
                 command.extend(["-qvbr_quality_level", str(qvbr_quality_level)])
             except ValueError:
-                raise ValueError("QVBR quality must be a number between 1-51")
+                raise ValueError("QVBR quality must be a number between 1 and 51")
 
         if self.enable_additional_options.get():
             add_val = self.additional_options.get().strip()
@@ -2600,6 +2788,7 @@ class VideoConverterApp:
             self.status_text.set("File selected. Ready for conversion.")
             self._calculate_estimated_size()
             self._set_trim_end_to_duration()
+            self.custom_command = None
 
     def _browse_output(self):
         default_name = (
@@ -2625,6 +2814,7 @@ class VideoConverterApp:
         )
         if filename:
             self.output_file.set(os.path.normpath(filename))
+            self.custom_command = None
 
     def _browse_ffmpeg(self):
         filename = filedialog.askopenfilename(
@@ -2648,10 +2838,12 @@ class VideoConverterApp:
     def _toggle_encoder_options_frame(self):
         if self.enable_encoder_options.get():
             self.encoder_options_frame.grid(
-                row=6, column=0, columnspan=4, sticky="ew", padx=10, pady=10
+                row=6, column=0, columnspan=3, padx=10, pady=5, sticky="ew"
             )
+            self.auto_button.grid()
         else:
-            self.encoder_options_frame.grid_forget()
+            self.encoder_options_frame.grid_remove()
+            self.auto_button.grid_remove()
         self._update_window_size()
 
     def _toggle_custom_fps_entry(self):
@@ -3196,8 +3388,12 @@ class VideoConverterApp:
     def _update_codec_settings(self):
         if self.video_codec.get() == "hevc":
             # HEVC settings
-            self.profile.set("main")
-            self.profile_option_menu.configure(values=["main", "main10"])
+            self.profile.set("auto")
+            self.profile_option_menu.configure(values=["auto", "main", "main10"])
+            # Show Profile Tier for HEVC
+            self.profile_tier_label.grid()
+            self.profile_tier_option_menu.grid()
+
             self.level_option_menu.configure(
                 values=[
                     "auto",
@@ -3217,21 +3413,25 @@ class VideoConverterApp:
                 ]
             )
 
-            self.tier_label.grid()
-            self.tier_option_menu.grid()
             self.coder_label.grid_remove()
             self.coder_option_menu.grid_remove()
 
             # Show profile menu for HEVC
             self.profile_option_menu.grid()
-            ctk.CTkLabel(
-                self.encoder_options_frame.winfo_children()[0], text="Profile:"
-            ).grid(row=2, column=0, sticky="w", padx=5, pady=2)
+            for child in self.encoder_options_frame.winfo_children()[
+                0
+            ].winfo_children():
+                if isinstance(child, ctk.CTkLabel) and child.cget("text") == "Profile:":
+                    child.grid(row=2, column=0, sticky="w", padx=5, pady=2)
 
         elif self.video_codec.get() == "av1":
             # AV1 settings
-            self.profile.set("main")
-            self.profile_option_menu.configure(values=["main"])
+            self.profile.set("auto")
+            self.profile_option_menu.configure(values=["auto", "main"])
+            # AV1 settings - hide Profile Tier
+            self.profile_tier_label.grid_remove()
+            self.profile_tier_option_menu.grid_remove()
+
             self.level_option_menu.configure(
                 values=[
                     "auto",
@@ -3262,25 +3462,32 @@ class VideoConverterApp:
                 ]
             )
 
-            self.tier_label.grid()
-            self.tier_option_menu.grid()
             self.coder_label.grid_remove()
             self.coder_option_menu.grid_remove()
 
-            # Hide profile menu for AV1
-            self.profile_option_menu.grid_remove()
+            # Profile menu for AV1
+            self.profile_option_menu.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
             for child in self.encoder_options_frame.winfo_children()[
                 0
             ].winfo_children():
                 if isinstance(child, ctk.CTkLabel) and child.cget("text") == "Profile:":
-                    child.grid_remove()
-
+                    child.grid(row=2, column=0, sticky="w", padx=5, pady=2)
         else:
             # H.264 settings
-            self.profile.set("main")
+            self.profile.set("auto")
             self.profile_option_menu.configure(
-                values=["main", "high", "constrained_baseline", "constrained_high"]
+                values=[
+                    "auto",
+                    "main",
+                    "high",
+                    "constrained_baseline",
+                    "constrained_high",
+                ]
             )
+            # H.264 settings - hide Profile Tier
+            self.profile_tier_label.grid_remove()
+            self.profile_tier_option_menu.grid_remove()
+
             self.level_option_menu.configure(
                 values=[
                     "auto",
@@ -3308,14 +3515,26 @@ class VideoConverterApp:
 
             self.coder_label.grid()
             self.coder_option_menu.grid()
-            self.tier_label.grid_remove()
-            self.tier_option_menu.grid_remove()
 
             # Show profile menu for H.264
             self.profile_option_menu.grid()
-            ctk.CTkLabel(
-                self.encoder_options_frame.winfo_children()[0], text="Profile:"
-            ).grid(row=2, column=0, sticky="w", padx=5, pady=2)
+            for child in self.encoder_options_frame.winfo_children()[
+                0
+            ].winfo_children():
+                if isinstance(child, ctk.CTkLabel) and child.cget("text") == "Profile:":
+                    child.grid(row=2, column=0, sticky="w", padx=5, pady=2)
+
+        self.custom_command = None
+
+        preset_values = ["auto", "speed", "balanced", "quality"]
+        if self.video_codec.get() == "av1":
+            preset_values.append("high_quality")
+
+        if hasattr(self, "preset_option_menu"):
+            self.preset_option_menu.configure(values=preset_values)
+
+            if self.preset.get() not in preset_values:
+                self.preset.set(preset_values[0])
 
     def _update_output_filename(self, *args):
         if self.input_file.get() and not self.input_file.get().startswith(
@@ -3385,8 +3604,7 @@ class VideoConverterApp:
             else:
                 self.profile.set("main")
             self.level.set("auto")
-            self.tier.set("1")
-            self.rc.set("hqcbr")
+            self.rc.set("hqvbr")
             self.preencode.set(False)
             self.preanalysis.set(False)
             self.vbaq.set(True)
@@ -3444,8 +3662,10 @@ class VideoConverterApp:
                 self.profile.set("main")
             else:
                 self.profile.set("high")
-            self.tier.set("1")
-            self.rc.set("hqcbr")
+            self.rc.set("hqvbr")
+
+            if self.video_codec.get() == "hevc":
+                self.profile_tier.set("auto")
 
             # Flags
             self.preencode.set(False)
@@ -3471,14 +3691,21 @@ class VideoConverterApp:
             self.interpolation_algo.set("spline")
 
             # Encoder settings
-            self.preset.set("quality")
+            if self.video_codec.get() == "av1":
+                self.preset.set("high_quality")
+            else:
+                self.preset.set("quality")
+
             self.usage.set("high_quality")
             if self.video_codec.get() == "hevc":
                 self.profile.set("main")
             else:
                 self.profile.set("high")
-            self.tier.set("1")
+
             self.rc.set("hqvbr")
+
+            if self.video_codec.get() == "hevc":
+                self.profile_tier.set("high")
 
             # Flags
             self.preencode.set(False)
@@ -3510,8 +3737,10 @@ class VideoConverterApp:
                 self.profile.set("main")
             else:
                 self.profile.set("high")
-            self.tier.set("1")
-            self.rc.set("hqcbr")
+            self.rc.set("hqvbr")
+
+            if self.video_codec.get() == "hevc":
+                self.profile_tier.set("auto")
 
             # Flags
             self.preencode.set(False)
@@ -3537,14 +3766,21 @@ class VideoConverterApp:
             self.interpolation_algo.set("spline")
 
             # Encoder settings
-            self.preset.set("quality")
+            if self.video_codec.get() == "av1":
+                self.preset.set("high_quality")
+            else:
+                self.preset.set("quality")
+
             self.usage.set("high_quality")
             if self.video_codec.get() == "hevc":
                 self.profile.set("main")
             else:
                 self.profile.set("high")
-            self.tier.set("1")
+
             self.rc.set("hqvbr")
+
+            if self.video_codec.get() == "hevc":
+                self.profile_tier.set("high")
 
             # Flags
             self.preencode.set(False)
@@ -3605,7 +3841,7 @@ class VideoConverterApp:
             return False
 
         # Convert to seconds
-        time_seconds = self._time_str_to_seconds(time_str)
+        time_seconds = max(0, round(self._time_str_to_seconds(time_str), 3))
 
         # Get video duration
         duration = self._get_video_duration_safe()
@@ -3657,7 +3893,7 @@ class VideoConverterApp:
             self.additional_options_frame, fg_color="transparent"
         )
         self.trim_slider_frame.grid(
-            row=3, column=0, columnspan=3, sticky="ew", padx=10, pady=(0, 10)
+            row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 0)
         )
 
         # Container for canvas and button in one line
@@ -3677,9 +3913,9 @@ class VideoConverterApp:
             width=30,
             height=30,
             command=self._reset_trim_slider,
-            fg_color="#1f6aa5",
-            hover_color="#2a7ab9",
-            text_color=TEXT_COLOR_W,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
         )
         self.trim_reset_btn.pack(side="right", padx=(0, 4))
 
@@ -4072,27 +4308,22 @@ class VideoConverterApp:
         if hasattr(self, "trim_canvas"):
             self._draw_trim_slider()
 
-    def _apply_hdr_to_sdr(self):
-        """Apply HDR to SDR conversion settings"""
-        hdr_filter = (
-            "zscale=transfer=linear:npl=100,"
-            "tonemap=tonemap=hable:desat=0,"
-            "zscale=transfer=bt709:matrix=bt709:primaries=bt709"
-        )
-        self._add_video_filter(hdr_filter)
-        self.hdr_mode = True
-
     def _update_rate_control_settings(self, *args):
-        """Show/hide QVBR quality field based on rate control selection"""
+        """Show/hide QVBR quality field based on rate control selection and CQP mode"""
         rc_mode = self.rc.get()
-        if rc_mode in ("qvbr", "hqvbr"):
-            # Show QVBR quality controls
-            self.qvbr_quality_level_label.grid()
-            self.qvbr_quality_level_entry.grid()
-        else:
-            # Hide QVBR quality controls
+
+        # Hide QVBR quality if Constant QP mode is enabled
+        if self.constant_qp_mode.get():
             self.qvbr_quality_level_label.grid_remove()
             self.qvbr_quality_level_entry.grid_remove()
+        else:
+            # Show QVBR quality controls only for QVBR modes when CQP is disabled
+            if rc_mode in ("qvbr", "hqvbr"):
+                self.qvbr_quality_level_label.grid()
+                self.qvbr_quality_level_entry.grid()
+            else:
+                self.qvbr_quality_level_label.grid_remove()
+                self.qvbr_quality_level_entry.grid_remove()
 
     def _update_max_pa_state(self, *args):
         """Update Max PA checkbox state based on Preanalysis setting"""
@@ -4151,7 +4382,7 @@ def get_icon_path():
 
 root = ctk.CTk()
 app = VideoConverterApp(root)
-
+ctk.deactivate_automatic_dpi_awareness()
 icon_path = get_icon_path()
 if os.path.exists(icon_path):
     root.after(201, lambda: root.iconbitmap(icon_path))
