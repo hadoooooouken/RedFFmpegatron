@@ -145,7 +145,7 @@ class VideoConverterApp:
         self.preview_job = None  # used for debouncing preview creation
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.0.5")
+        master.title("RedFFmpegatron 1.0.6")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -1316,45 +1316,16 @@ class VideoConverterApp:
         additional_options_toggle.grid(row=11, column=0, sticky="w", padx=10, pady=5)
         self.additional_options_frame = ctk.CTkFrame(main_frame, fg_color=SECONDARY_BG)
 
-        # Options
-        ctk.CTkLabel(self.additional_options_frame, text="Add FF Options:").grid(
-            row=3, column=0, sticky="w", padx=10, pady=10
-        )
-        self.additional_options_entry = ctk.CTkEntry(
-            self.additional_options_frame,
-            textvariable=self.additional_options,
-            width=450,
-            fg_color=SECONDARY_BG,
-            text_color=TEXT_COLOR_W,
-        )
-        self.additional_options_entry.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
-        self.additional_options_entry.insert(0, self.additional_options_placeholder)
-        self.additional_options_entry.configure(text_color=PLACEHOLDER_COLOR)
-        self.additional_options_entry.bind("<FocusIn>", self._on_options_entry_focus_in)
-        self.additional_options_entry.bind(
-            "<FocusOut>", self._on_options_entry_focus_out
-        )
-
-        ctk.CTkButton(
-            self.additional_options_frame,
-            text="?",
-            width=30,
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
-            text_color=TEXT_COLOR_B,
-            command=lambda: self._show_help_window("AMF Encoder Options", "encoder"),
-        ).grid(row=3, column=2, padx=(0, 10))
-
         # Trimming controls
         trim_frame = ctk.CTkFrame(self.additional_options_frame, fg_color="transparent")
-        trim_frame.grid(row=2, column=0, columnspan=3, sticky="w")
+        trim_frame.grid(row=1, column=0, columnspan=3, sticky="w")
 
         ctk.CTkLabel(trim_frame, text="Trimming:").grid(
-            row=2, column=1, sticky="w", padx=10, pady=10
+            row=1, column=1, sticky="w", padx=10, pady=10
         )
 
         # Start time
-        ctk.CTkLabel(trim_frame, text="From:").grid(row=2, column=2, padx=(85, 5))
+        ctk.CTkLabel(trim_frame, text="From:").grid(row=1, column=2, padx=(85, 5))
         start_entry = ctk.CTkEntry(
             trim_frame,
             textvariable=self.trim_start,
@@ -1362,14 +1333,14 @@ class VideoConverterApp:
             fg_color=SECONDARY_BG,
             text_color=TEXT_COLOR_W,
         )
-        start_entry.grid(row=2, column=3, padx=5)
+        start_entry.grid(row=1, column=3, padx=5)
         start_entry.bind(
             "<Return>",
             lambda e: self._validate_and_update_trim_time(self.trim_start, True),
         )
 
         # End time
-        ctk.CTkLabel(trim_frame, text="To:").grid(row=2, column=4, padx=10)
+        ctk.CTkLabel(trim_frame, text="To:").grid(row=1, column=4, padx=10)
         end_entry = ctk.CTkEntry(
             trim_frame,
             textvariable=self.trim_end,
@@ -1377,7 +1348,7 @@ class VideoConverterApp:
             fg_color=SECONDARY_BG,
             text_color=TEXT_COLOR_W,
         )
-        end_entry.grid(row=2, column=5)
+        end_entry.grid(row=1, column=5)
         end_entry.bind(
             "<Return>",
             lambda e: self._validate_and_update_trim_time(self.trim_end, False),
@@ -1400,7 +1371,7 @@ class VideoConverterApp:
             hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=100,
-        ).grid(row=2, column=6, padx=15)
+        ).grid(row=1, column=6, padx=15)
 
         # Streamcopy checkbox
         ctk.CTkCheckBox(
@@ -1410,12 +1381,41 @@ class VideoConverterApp:
             variable=self.trim_streamcopy,
             fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
-        ).grid(row=2, column=7)
+        ).grid(row=1, column=7)
+
+        # FF Options
+        ctk.CTkLabel(self.additional_options_frame, text="Add FF Options:").grid(
+            row=2, column=0, sticky="w", padx=10, pady=10
+        )
+        self.additional_options_entry = ctk.CTkEntry(
+            self.additional_options_frame,
+            textvariable=self.additional_options,
+            width=450,
+            fg_color=SECONDARY_BG,
+            text_color=TEXT_COLOR_W,
+        )
+        self.additional_options_entry.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
+        self.additional_options_entry.insert(0, self.additional_options_placeholder)
+        self.additional_options_entry.configure(text_color=PLACEHOLDER_COLOR)
+        self.additional_options_entry.bind("<FocusIn>", self._on_options_entry_focus_in)
+        self.additional_options_entry.bind(
+            "<FocusOut>", self._on_options_entry_focus_out
+        )
+
+        ctk.CTkButton(
+            self.additional_options_frame,
+            text="?",
+            width=30,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            command=lambda: self._show_help_window("AMF Encoder Options", "encoder"),
+        ).grid(row=2, column=2, padx=(0, 10))
 
         # Video Filters
         ctk.CTkLabel(
             self.additional_options_frame, text="Add Video Filters (-vf):"
-        ).grid(row=4, column=0, sticky="w", padx=10, pady=2)
+        ).grid(row=3, column=0, sticky="w", padx=10, pady=2)
         self.additional_filter_options_entry = ctk.CTkEntry(
             self.additional_options_frame,
             textvariable=self.additional_filter_options,
@@ -1424,7 +1424,7 @@ class VideoConverterApp:
             text_color=TEXT_COLOR_W,
         )
         self.additional_filter_options_entry.grid(
-            row=4, column=1, sticky="ew", padx=5, pady=10
+            row=3, column=1, sticky="ew", padx=5, pady=10
         )
         self.additional_filter_options_entry.insert(
             0, self.additional_filter_options_placeholder
@@ -1445,12 +1445,12 @@ class VideoConverterApp:
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             command=lambda: self._show_help_window("FFmpeg Video Filters", "filters"),
-        ).grid(row=4, column=2, padx=(0, 10))
+        ).grid(row=3, column=2, padx=(0, 10))
 
         # Audio Filters
         ctk.CTkLabel(
             self.additional_options_frame, text="Add Audio Filters (-af):"
-        ).grid(row=5, column=0, sticky="w", padx=10, pady=2)
+        ).grid(row=4, column=0, sticky="w", padx=10, pady=2)
         self.additional_audio_filter_options_entry = ctk.CTkEntry(
             self.additional_options_frame,
             textvariable=self.additional_audio_filter_options,
@@ -1459,7 +1459,7 @@ class VideoConverterApp:
             text_color=TEXT_COLOR_W,
         )
         self.additional_audio_filter_options_entry.grid(
-            row=5, column=1, sticky="ew", padx=5, pady=10
+            row=4, column=1, sticky="ew", padx=5, pady=10
         )
         self.additional_audio_filter_options_entry.insert(
             0, self.additional_audio_filter_options_placeholder
@@ -1479,7 +1479,7 @@ class VideoConverterApp:
             self.additional_options_frame, fg_color="transparent"
         )
         quick_buttons_frame.grid(
-            row=6, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
+            row=5, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
         )
 
         ctk.CTkButton(
@@ -1550,7 +1550,7 @@ class VideoConverterApp:
             self.additional_options_frame, fg_color="transparent"
         )
         quick_buttons_frame_2.grid(
-            row=7, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
+            row=6, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
         )
 
         # FPS passtrough button
@@ -1614,7 +1614,7 @@ class VideoConverterApp:
             self.additional_options_frame, fg_color="transparent"
         )
         quick_buttons_frame_3.grid(
-            row=8, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
+            row=7, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
         )
 
         # Force 8 bit button
@@ -3841,7 +3841,7 @@ class VideoConverterApp:
             return False
 
         # Convert to seconds
-        time_seconds = max(0, round(self._time_str_to_seconds(time_str), 3))
+        time_seconds = max(0, int(self._time_str_to_seconds(time_str)))
 
         # Get video duration
         duration = self._get_video_duration_safe()
@@ -4182,7 +4182,7 @@ class VideoConverterApp:
             return
 
         # Convert to seconds
-        time_seconds = self._time_str_to_seconds(time_str)
+        time_seconds = max(0, int(self._time_str_to_seconds(time_str)))
 
         # Get video duration
         duration = self._get_video_duration_safe()

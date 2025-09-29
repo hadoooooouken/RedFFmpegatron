@@ -100,8 +100,8 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
       --include-data-file=icon.ico=./ ^
       --include-data-file=rff-help.txt=./rff-help.txt ^
       --product-name="RedFFmpegatron" ^
-      --product-version="1.0.5" ^
-      --file-version="1.0.5" ^
+      --product-version="1.0.6" ^
+      --file-version="1.0.6" ^
       --file-description="RedFFmpegatron" ^
       --company-name="Deepseek Enjoyer" ^
       --copyright="Copyright (C) 2025 hadouken" ^
