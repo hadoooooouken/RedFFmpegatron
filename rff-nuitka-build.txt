@@ -1,11 +1,12 @@
-python -m nuitka --msvc=latest --standalone --windows-console-mode=disable ^
+python -m nuitka --msvc=latest --lto=yes ^
+--standalone --windows-console-mode=disable ^
 --include-package=customtkinter --enable-plugin=tk-inter ^
---windows-icon-from-ico="icon.ico" ^
---include-data-file=icon.ico=./ ^
+--windows-icon-from-ico="rff.ico" ^
+--include-data-file=rff.ico=./ ^
 --include-data-file=rff-help.txt=./rff-help.txt ^
 --product-name="RedFFmpegatron" ^
---product-version="1.0.6" ^
---file-version="1.0.6" ^
+--product-version="1.0.7" ^
+--file-version="1.0.7" ^
 --file-description="RedFFmpegatron" ^
 --company-name="Deepseek Enjoyer" ^
 --copyright="Copyright (C) 2025 hadouken" ^

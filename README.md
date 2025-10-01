@@ -94,14 +94,15 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
     Navigate to the project's root directory in your terminal and run the following command. This command configures Nuitka to create a standalone, single-file executable with disabled console mode, include necessary packages, set application metadata, and specify an icon.
 
     ```
-      python -m nuitka --msvc=latest --standalone --windows-console-mode=disable ^
+      python -m nuitka --msvc=latest --lto=yes ^
+      --standalone --windows-console-mode=disable ^
       --include-package=customtkinter --enable-plugin=tk-inter ^
-      --windows-icon-from-ico="icon.ico" ^
-      --include-data-file=icon.ico=./ ^
+      --windows-icon-from-ico="rff.ico" ^
+      --include-data-file=rff.ico=./ ^
       --include-data-file=rff-help.txt=./rff-help.txt ^
       --product-name="RedFFmpegatron" ^
-      --product-version="1.0.6" ^
-      --file-version="1.0.6" ^
+      --product-version="1.0.7" ^
+      --file-version="1.0.7" ^
       --file-description="RedFFmpegatron" ^
       --company-name="Deepseek Enjoyer" ^
       --copyright="Copyright (C) 2025 hadouken" ^
@@ -145,6 +146,6 @@ If you have a suggestion that would make this better, you can simply open an iss
 ## Notes
 
 - This app is designed for AMD GPUs that support **AMF hardware encoding**.
-- For NVIDIA GPUs use [nvencFF Toolbox](https://gitlab.com/hadoukez/nvencff-toolbox).
+- For NVIDIA GPUs use [nvencFFX](https://gitlab.com/hadoukez/nvencffx).
 - For Intel Arc GPUs and integrated graphics use [QuickFFSync](https://gitlab.com/hadoukez/quickffsync).
 - The tool is intended for Windows only.

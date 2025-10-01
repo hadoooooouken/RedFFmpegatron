@@ -1,5 +1,9 @@
 # RedFFmpegatron - Changelog
 
+## [1.0.7] - 2025-10-01
+- Added automatic session saving (ffmpeg path, last input directory, last output directory, codec selection, encoder settings);
+- UI fixes.
+
 ## [1.0.6] - 2025-09-29
 - The preview generation mechanism in the Trimming section has been updated.
 
