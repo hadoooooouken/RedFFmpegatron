@@ -1,5 +1,8 @@
 # RedFFmpegatron - Changelog
 
+## [1.0.9] - 2025-10-04
+- Startup UI fixes for some systems.
+
 ## [1.0.8] - 2025-10-02
 - Fixed and updated trim;
 - Added new checkboxes: Copy (same as old Streamcopy) and Precise (-ss after -i):

@@ -158,7 +158,7 @@ class VideoConverterApp:
         self.preview_job = None  # used for debouncing preview creation
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.0.8")
+        master.title("RedFFmpegatron 1.0.9")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -1863,6 +1863,7 @@ class VideoConverterApp:
         self.progress_label = ctk.CTkLabel(self.progress_frame, text="0%")
         self.progress_label.pack()
         self.progress_frame.grid_remove()
+        self.master.after(100, self._startup_ui_fix)
 
         # Play buttons
         self.play_buttons_frame = ctk.CTkFrame(self.button_frame, fg_color=PRIMARY_BG)
@@ -1925,6 +1926,12 @@ class VideoConverterApp:
         self._toggle_audio_options_frame()
         self._toggle_additional_options_frame()
         self._toggle_presets_frame()
+
+    def _startup_ui_fix(self):
+        self.progress_frame.grid_remove()
+        self.progress_value.set(0.0)
+        self.auto_button.grid_remove()
+        self.default_button.grid_remove()
 
     def _play_input_file(self):
         input_path = self.input_file.get()
@@ -2920,7 +2927,7 @@ class VideoConverterApp:
                 "preanalysis": self.preanalysis.get(),
                 "max_pa": self.max_pa.get(),
                 "smart_access_video": self.smart_access_video.get(),
-                "version": "1.0.8",
+                "version": "1.0.9",
             }
 
             with open(settings_file, "w", encoding="utf-8") as file:
@@ -4243,7 +4250,7 @@ class VideoConverterApp:
             return False
 
         # Convert to seconds
-        time_seconds = max(0, int(self._time_str_to_seconds(time_str)))
+        time_seconds = max(0, self._time_str_to_seconds(time_str))
 
         # Get video duration
         duration = self._get_video_duration_safe()
@@ -4584,7 +4591,7 @@ class VideoConverterApp:
             return
 
         # Convert to seconds
-        time_seconds = max(0, int(self._time_str_to_seconds(time_str)))
+        time_seconds = max(0, self._time_str_to_seconds(time_str))
 
         # Get video duration
         duration = self._get_video_duration_safe()
