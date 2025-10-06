@@ -1,5 +1,12 @@
 # RedFFmpegatron - Changelog
 
+## [1.1.0] - 2025-10-07
+- Bug fixes;
+- UI improvements;
+- Opus audio presets;
+- VideoSR update;
+- AMF hwaccel for trim preview generation.
+
 ## [1.0.9] - 2025-10-04
 - Startup UI fixes for some systems.
 
