@@ -70,7 +70,7 @@ class VideoConverterApp:
         self.preview_job = None  # used for debouncing preview creation
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.1.1")
+        master.title("RedFFmpegatron 1.1.2")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -2199,7 +2199,7 @@ class VideoConverterApp:
                 "preanalysis": self.preanalysis.get(),
                 "max_pa": self.max_pa.get(),
                 "smart_access_video": self.smart_access_video.get(),
-                "version": "1.1.1",
+                "version": "1.1.2",
             }
 
             with open(settings_file, "w", encoding="utf-8") as file:
@@ -2923,6 +2923,7 @@ class VideoConverterApp:
         ):
             current_output = self.output_file.get()
 
+            # Only update if the current filename follows the pattern with codec suffix
             if (
                 "_hevc_custom." in current_output
                 or "_h264_custom." in current_output
@@ -2935,8 +2936,9 @@ class VideoConverterApp:
                 )
                 base_name = os.path.basename(base)
             else:
-                input_path = self.input_file.get()
-                base_name = os.path.splitext(os.path.basename(input_path))[0]
+                # If the filename doesn't follow the pattern, don't auto-update it
+                # This preserves manually selected extensions like .mkv, .mov, etc.
+                return
 
             if os.path.isdir(os.path.dirname(current_output)):
                 dir_name = os.path.dirname(current_output)
@@ -2950,7 +2952,13 @@ class VideoConverterApp:
                 if self.video_codec.get() == "h264"
                 else "_av1"
             )
-            new_filename = f"{base_name}{codec_suffix}_custom.mp4"
+
+            # Preserve the original file extension
+            original_extension = os.path.splitext(current_output)[1]
+            if not original_extension:  # If no extension, default to .mp4
+                original_extension = ".mp4"
+
+            new_filename = f"{base_name}{codec_suffix}_custom{original_extension}"
             new_output = os.path.normpath(os.path.join(dir_name, new_filename))
 
             self.output_file.set(new_output)
