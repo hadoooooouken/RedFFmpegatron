@@ -472,3 +472,32 @@ Cancelled = Conversion stopped by user
 
 Note: All files in a batch conversion use the same settings from the main window. 
 Make sure to configure your desired quality, codec, and other options before starting batch conversion.
+
+#SCREEN RECORDING
+
+The Screen Record feature allows you to capture Windows Desktop
+
+#Screen Record Button
+-Starts screen recording when clicked
+-Stops recording when clicked again
+-Automatically minimizes the main window during recording to avoid capturing itself
+-Uses red color when active to indicate recording state
+
+#Recording Process
+- Recording starts after a 2-second delay to allow window minimization
+- Captures entire desktop screen using FFmpeg's ddagrab filter
+- Real-time monitoring shows recording status in the output window
+- Recording continues in background while window is minimized
+
+#Output Files
+- Default location: Desktop folder
+- Automatic filename: screen_record-DD_MM_YY-HH_MM.[extension]
+- Uses current output file extension settings (.mp4, .mkv, .mov)
+- Preserves current encoding settings (codec, quality, FPS)
+
+#Settings Used
+- FPS: Uses selected FPS (defaults to 60 if "source" selected)
+- Video Codec: HEVC, H.264, or AV1 based on current selection
+- Quality: Constant QP mode or Bitrate mode as configured
+- Hardware Acceleration: AMD AMF
+- Audio capture: Not implemented for screen recording

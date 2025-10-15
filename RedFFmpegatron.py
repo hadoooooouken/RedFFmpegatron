@@ -4,11 +4,12 @@ import subprocess
 import sys
 import tempfile
 import tkinter as tk
+from datetime import datetime
 from io import BytesIO
 from json import dump, load
 from re import sub
 from shlex import split
-from threading import Thread
+from threading import Thread, Timer
 from tkinter import filedialog, messagebox
 from winsound import MB_ICONASTERISK, MessageBeep
 
@@ -525,7 +526,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.1.3")
+        master.title("RedFFmpegatron 1.1.4")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -733,6 +734,9 @@ class VideoConverterApp:
         self.last_input_dir = ctk.StringVar(value="")
         self.last_output_dir = ctk.StringVar(value="")
         self.precise_trim = ctk.BooleanVar(value=False)
+        # Screen recording variables
+        self.is_recording = False
+        self.recording_process = None
 
     def _create_widgets(self):
         # Build the entire GUI interface
@@ -2062,8 +2066,19 @@ class VideoConverterApp:
             text_color=TEXT_COLOR_B,
             height=40,
         )
-        self.batch_convert_button.pack(side="left", expand=True, fill="x", padx=(2, 0))
+        self.batch_convert_button.pack(side="left", expand=True, fill="x", padx=(2, 2))
         self.batch_convert_button.configure(command=self._open_batch_converter)
+
+        self.screen_record_button = ctk.CTkButton(
+            self.play_buttons_frame,
+            text="Screen Record",
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            height=40,
+        )
+        self.screen_record_button.pack(side="left", expand=True, fill="x", padx=(2, 0))
+        self.screen_record_button.configure(command=self._screen_record)
 
         # Convert Button
         self.convert_button = ctk.CTkButton(
@@ -2149,6 +2164,194 @@ class VideoConverterApp:
             self.batch_converter_window._update_files_display()
             self.batch_converter_window.window.lift()
             self.batch_converter_window.window.focus_force()
+
+    def _screen_record(self):
+        if self.is_recording:
+            # Stop recording
+            self._stop_recording()
+        else:
+            # Start recording
+            self._start_recording()
+
+    def _start_recording(self):
+        if not hasattr(self, "original_title"):
+            self.original_title = self.master.title()
+
+        self.master.title("Screen is recording now - RedFFmpegatron")
+        if not self.ffmpeg_path:
+            messagebox.showerror("Error", "FFmpeg path is not specified.")
+            return
+
+        # Get output file path
+        output_file = self.output_file.get()
+        if not output_file:
+            # Generate default filename on desktop
+            desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+            now = datetime.now()
+            date_str = now.strftime("%d_%m_%y-%H_%M")
+
+            # Get extension from current output or use mp4
+            current_output = self.output_file.get()
+            if current_output:
+                ext = os.path.splitext(current_output)[1]
+                if not ext:
+                    ext = ".mp4"
+            else:
+                ext = ".mp4"
+
+            output_file = os.path.join(desktop, f"screen_record-{date_str}{ext}")
+
+        # Get FPS - use 60 if source or not specified
+        fps = self.fps_option.get()
+        if fps == "source" or not fps:
+            fps = "60"
+        elif fps == "custom":
+            fps = self.custom_fps.get()
+
+        # Build screen recording command
+        command = [
+            self.ffmpeg_path,
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"ddagrab=framerate={fps}",
+        ]
+
+        # Add different video filter based on codec
+        if self.video_codec.get() == "h264":
+            command.extend(["-vf", "hwdownload,format=bgra,setparams=range=limited"])
+        else:
+            command.extend(["-vf", "setparams=range=limited"])
+
+        # Add encoder settings
+        codec_map = {"hevc": "hevc_amf", "h264": "h264_amf", "av1": "av1_amf"}
+        codec = codec_map.get(self.video_codec.get(), "hevc_amf")
+
+        command.extend(["-c:v", codec])
+
+        # Add quality settings
+        if self.constant_qp_mode.get():
+            command.extend(
+                [
+                    "-rc:v",
+                    "cqp",
+                    "-qp_i:v",
+                    self.quality_level.get(),
+                    "-qp_p:v",
+                    self.quality_level.get(),
+                    "-qp_b:v",
+                    self.quality_level.get(),
+                ]
+            )
+        else:
+            command.extend(["-rc:v", self.rc.get(), "-b:v", f"{self.bitrate.get()}k"])
+
+        # Constant FPS + No audio
+        command.extend(["-fps_mode", "cfr", "-an", output_file])
+
+        # PRINT THE COMMAND TO CONSOLE
+        print("Screen recording command:")
+        print(" ".join(command))
+
+        try:
+            # Update UI first
+            self.is_recording = True
+            self.screen_record_button.configure(
+                text="Stop Recording", fg_color=ACCENT_RED, hover_color=HOVER_RED
+            )
+            self.status_text.set("Screen is recording now...")
+            self.ffmpeg_output.set("Screen recording starting...")
+
+            # Minimize window after 1 second
+            self.master.after(1000, self.master.iconify)
+
+            # Start recording process after 1 second delay using Timer
+            def start_recording():
+                startupinfo = None
+                creationflags = 0
+                if os.name == "nt":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+                    creationflags = subprocess.CREATE_NO_WINDOW
+
+                self.recording_process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    startupinfo=startupinfo,
+                    creationflags=creationflags,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+
+                self.ffmpeg_output.set("Screen recording started...")
+
+                # Start monitoring thread
+                recording_thread = Thread(target=self._monitor_recording)
+                recording_thread.start()
+
+            # Use Timer to delay the recording start by 2 seconds
+            timer = Timer(2.0, start_recording)
+            timer.start()
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start screen recording: {str(e)}")
+
+    def _stop_recording(self):
+        if hasattr(self, "original_title"):
+            self.master.title(self.original_title)
+        if not self.recording_process:
+            return
+
+        try:
+            # Send 'q' to gracefully stop FFmpeg
+            self.recording_process.stdin.write("q")
+            self.recording_process.stdin.flush()
+        except (BrokenPipeError, OSError, IOError) as e:
+            # If stdin fails, terminate the process
+            print(f"Failed to send stop signal via stdin: {e}")
+            self.recording_process.terminate()
+
+        # Wait for process to finish
+        try:
+            self.recording_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.recording_process.kill()
+
+        # Update UI
+        self.is_recording = False
+        self.recording_process = None
+        self.screen_record_button.configure(
+            text="Screen Record", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
+        )
+        self.status_text.set("Screen recording stopped")
+        self.ffmpeg_output.set("Screen recording completed")
+
+        # Restore window
+        self.master.deiconify()
+
+    def _monitor_recording(self):
+        """Monitor the recording process output"""
+        while self.is_recording and self.recording_process:
+            try:
+                line = self.recording_process.stdout.readline()
+                if not line:
+                    break
+
+                if self.is_recording:  # Check again in case it changed
+                    self.master.after(0, lambda: self.ffmpeg_output.set(line.strip()))
+
+            except Exception:
+                break
+
+        # If we get here and still recording, process ended unexpectedly
+        if self.is_recording:
+            self.master.after(0, self._stop_recording)
 
     def _toggle_conversion(self):
         # Check if batch conversion should be started or cancelled
@@ -2717,7 +2920,7 @@ class VideoConverterApp:
                 "preanalysis": self.preanalysis.get(),
                 "max_pa": self.max_pa.get(),
                 "smart_access_video": self.smart_access_video.get(),
-                "version": "1.1.3",
+                "version": "1.1.4",
             }
 
             with open(settings_file, "w", encoding="utf-8") as file:

@@ -1,5 +1,8 @@
 # RedFFmpegatron - Changelog
 
+## [1.1.4] - 2025-10-16
+- Added "Screen Record".
+
 ## [1.1.3] - 2025-10-16
 - Added "Batch Convert";
 - Build with Python: 3.13.8 + Nuitka 2.9rc2.
