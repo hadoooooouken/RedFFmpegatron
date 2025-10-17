@@ -32,6 +32,8 @@ It provides a simple dark-themed interface with drag-and-drop support, presets, 
   - Add custom FFmpeg options
   - Video filters (crop, eq, unsharp, saturation, HDR→SDR, etc.)
   - Audio filters (atempo, loudnorm, etc.)
+- **Batch Conversion:** Process multiple video files in one go with the same settings - perfect for converting entire folders of videos.
+- **Screen Recording:** Record your screen directly with AMF encoding - choose frame rate, codec, and quality settings.
 - **Presets system** for quick configuration
 - **10-second preview** encoding with current settings
 - **Estimated output size** (bitrate mode only)
