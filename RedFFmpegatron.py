@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox
 from winsound import MB_ICONASTERISK, MessageBeep
 
 import customtkinter as ctk
+import win32clipboard
 from PIL import Image
 from win32api import DragFinish, DragQueryFile
 from win32con import GWL_WNDPROC, WM_DROPFILES
@@ -526,7 +527,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.1.4")
+        master.title("RedFFmpegatron 1.1.5")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -2224,13 +2225,17 @@ class VideoConverterApp:
         else:
             command.extend(["-vf", "setparams=range=limited"])
 
-        # Add encoder settings
+        # Encoder settings
         codec_map = {"hevc": "hevc_amf", "h264": "h264_amf", "av1": "av1_amf"}
         codec = codec_map.get(self.video_codec.get(), "hevc_amf")
 
         command.extend(["-c:v", codec])
 
-        # Add quality settings
+        # Preset settings
+        if self.preset.get() != "auto":
+            command.extend(["-preset:v", self.preset.get()])
+
+        # Quality settings
         if self.constant_qp_mode.get():
             command.extend(
                 [
@@ -2920,7 +2925,7 @@ class VideoConverterApp:
                 "preanalysis": self.preanalysis.get(),
                 "max_pa": self.max_pa.get(),
                 "smart_access_video": self.smart_access_video.get(),
-                "version": "1.1.4",
+                "version": "1.1.5",
             }
 
             with open(settings_file, "w", encoding="utf-8") as file:
@@ -5310,7 +5315,6 @@ class VideoConverterApp:
 
     def _copy_text(self):
         widget = self.master.focus_get()
-        self.master.clipboard_clear()
 
         try:
             if isinstance(widget, (ctk.CTkTextbox, tk.Text)):
@@ -5344,7 +5348,13 @@ class VideoConverterApp:
             print(f"Error copying text: {e}")
             text = ""
 
-        self.master.clipboard_append(text)
+        try:
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+            win32clipboard.CloseClipboard()
+        except Exception as e:
+            print(f"Error setting clipboard: {e}")
 
     def _paste_text(self):
         widget = self.master.focus_get()
@@ -5407,12 +5417,19 @@ class VideoConverterApp:
                     i += 1
 
             command_with_quotes = " ".join(quoted_parts)
-            self.master.clipboard_clear()
-            self.master.clipboard_append(command_with_quotes)
+
+            try:
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(
+                    command_with_quotes, win32clipboard.CF_UNICODETEXT
+                )
+                win32clipboard.CloseClipboard()
+            except Exception as e:
+                print(f"Error setting clipboard: {e}")
 
         except Exception:
             # Fallback: simple regex-based quoting for file paths
-
             command_with_quotes = sub(
                 r'(-i\s+)([^"\s]+)',
                 r'\1"\2"',
@@ -5423,9 +5440,16 @@ class VideoConverterApp:
                 r'\1"\2"\3',
                 command_with_quotes,  # Quote output files
             )
-            self.master.clipboard_clear()
-            self.master.clipboard_append(command_with_quotes)
-            messagebox.showinfo("Copied", "Command copied to clipboard!")
+
+            try:
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(
+                    command_with_quotes, win32clipboard.CF_UNICODETEXT
+                )
+                win32clipboard.CloseClipboard()
+            except Exception as e:
+                print(f"Error setting clipboard: {e}")
 
     # FILTERS & OPTIONS MANAGEMENT
     def _set_speed_filter(self, speed_factor):

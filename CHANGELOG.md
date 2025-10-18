@@ -1,5 +1,9 @@
 # RedFFmpegatron - Changelog
 
+## [1.1.5] - 2025-10-18
+- Screen recording now respects the "Preset" parameter value;
+- The clipboard is now preserved even after closing the program (for example, a copied ffmpeg command).
+
 ## [1.1.4] - 2025-10-16
 - Added "Screen Record".
 
