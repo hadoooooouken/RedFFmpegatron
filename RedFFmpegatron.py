@@ -527,7 +527,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.1.5")
+        master.title("RedFFmpegatron 1.1.6")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -638,6 +638,7 @@ class VideoConverterApp:
         # FPS and Scaling Settings
         self.fps_option.trace_add("write", lambda *args: self._on_setting_changed())
         self.custom_fps.trace_add("write", lambda *args: self._on_setting_changed())
+        self.fps_mode.trace_add("write", lambda *args: self._on_setting_changed())
         self.video_format_option.trace_add(
             "write", lambda *args: self._on_setting_changed()
         )
@@ -681,6 +682,7 @@ class VideoConverterApp:
         self.enable_fps_scale_options = ctk.BooleanVar(value=False)
         self.fps_option = ctk.StringVar(value="source")
         self.custom_fps = ctk.StringVar(value="30")
+        self.fps_mode = ctk.StringVar(value="auto")
         self.video_format_option = ctk.StringVar(value="source")
         self.custom_video_width = ctk.StringVar(value="1920")
         self.interpolation_algo = ctk.StringVar(value="bicubic")
@@ -738,6 +740,8 @@ class VideoConverterApp:
         # Screen recording variables
         self.is_recording = False
         self.recording_process = None
+        # Preview 10s
+        self.preview_process = None
 
     def _create_widgets(self):
         # Build the entire GUI interface
@@ -1304,9 +1308,32 @@ class VideoConverterApp:
         self.custom_fps_entry.grid(row=2, column=0, sticky="w", padx=20)
         self.custom_fps_entry.configure(state="disabled")
 
+        # FPS Mode
+        ctk.CTkLabel(self.fps_scale_options_frame, text="FPS Mode:").grid(
+            row=3, column=0, sticky="w", padx=10, pady=5
+        )
+
+        fps_mode_options = [
+            ("Auto", "auto"),
+            ("Constant", "cfr"),
+            ("Variable", "vfr"),
+            ("Passthrough", "passthrough"),
+        ]
+
+        for i, (text, value) in enumerate(fps_mode_options):
+            rb = ctk.CTkRadioButton(
+                self.fps_scale_options_frame,
+                text=text,
+                variable=self.fps_mode,
+                value=value,
+                fg_color=ACCENT_RED,
+                hover_color=HOVER_RED,
+            )
+            rb.grid(row=3, column=i + 1, sticky="w", padx=2)
+
         # Video Format
         ctk.CTkLabel(self.fps_scale_options_frame, text="Video Format:").grid(
-            row=3, column=0, sticky="w", padx=10, pady=2
+            row=4, column=0, sticky="w", padx=10, pady=2
         )
         video_format_options = [
             ("Source", "source"),
@@ -1326,7 +1353,7 @@ class VideoConverterApp:
                 fg_color=ACCENT_RED,
                 hover_color=HOVER_RED,
             )
-            rb.grid(row=3, column=i + 1, sticky="w", padx=2)
+            rb.grid(row=4, column=i + 1, sticky="w", padx=2)
 
         # Custom Video Format
         rb_custom_video = ctk.CTkRadioButton(
@@ -1338,7 +1365,7 @@ class VideoConverterApp:
             fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
-        rb_custom_video.grid(row=4, column=1, sticky="w", padx=2, pady=10)
+        rb_custom_video.grid(row=5, column=1, sticky="w", padx=2, pady=10)
 
         self.custom_video_width_entry = ctk.CTkEntry(
             self.fps_scale_options_frame,
@@ -1348,12 +1375,12 @@ class VideoConverterApp:
             fg_color=ACCENT_GREY,
             text_color=PLACEHOLDER_COLOR,
         )
-        self.custom_video_width_entry.grid(row=4, column=0, sticky="w", padx=20)
+        self.custom_video_width_entry.grid(row=5, column=0, sticky="w", padx=20)
         self.custom_video_width_entry.configure(state="disabled")
 
         # Interpolation
         ctk.CTkLabel(self.fps_scale_options_frame, text="Interpolation Algo:").grid(
-            row=5, column=0, sticky="w", padx=10, pady=10
+            row=6, column=0, sticky="w", padx=10, pady=10
         )
 
         self.interpolation_description = ctk.StringVar(
@@ -1373,7 +1400,7 @@ class VideoConverterApp:
             dropdown_fg_color=SECONDARY_BG,
             dropdown_hover_color=ACCENT_RED,
         )
-        interp_option_menu.grid(row=5, column=1, sticky="ew", padx=5, pady=2)
+        interp_option_menu.grid(row=6, column=1, sticky="ew", padx=5, pady=2)
 
         ctk.CTkLabel(
             self.fps_scale_options_frame,
@@ -1382,7 +1409,7 @@ class VideoConverterApp:
             wraplength=100,
             anchor="w",
             justify="left",
-        ).grid(row=5, column=2, sticky="w", padx=5)
+        ).grid(row=6, column=2, sticky="w", padx=5)
 
         # VideoSR Checkbox
         self.videosr_checkbox = ctk.CTkCheckBox(
@@ -1393,14 +1420,14 @@ class VideoConverterApp:
             fg_color=ACCENT_RED,
             hover_color=HOVER_RED,
         )
-        self.videosr_checkbox.grid(row=4, column=2, sticky="w")
+        self.videosr_checkbox.grid(row=5, column=2, sticky="w")
 
         # VideoSR Options Frame
         self.videosr_options_frame = ctk.CTkFrame(
             self.fps_scale_options_frame, fg_color="transparent"
         )
         self.videosr_options_frame.grid(
-            row=5, column=0, columnspan=4, sticky="ew", padx=10, pady=5
+            row=6, column=0, columnspan=4, sticky="ew", padx=10, pady=5
         )
 
         # Algorithm
@@ -1830,11 +1857,13 @@ class VideoConverterApp:
             row=6, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
         )
 
-        # FPS passtrough button
+        # Deshake video
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="FPS Pass",
-            command=lambda: self._add_additional_option("-fps_mode passthrough"),
+            text="Deshake",
+            command=lambda: self._add_video_filter(
+                "deshake=rx=32:ry=32:edge=3:blocksize=32:contrast=200:search=0"
+            ),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
@@ -2037,17 +2066,6 @@ class VideoConverterApp:
         self.play_input_button.pack(side="left", expand=True, fill="x", padx=(0, 2))
         self.play_input_button.configure(command=self._play_input_file)
 
-        self.play10s_button = ctk.CTkButton(
-            self.play_buttons_frame,
-            text="Play 10s Preview",
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
-            text_color=TEXT_COLOR_B,
-            height=40,
-        )
-        self.play10s_button.pack(side="left", expand=True, fill="x", padx=(2, 2))
-        self.play10s_button.configure(command=self._create_10s_preview)
-
         self.play_output_button = ctk.CTkButton(
             self.play_buttons_frame,
             text="Play Output File",
@@ -2058,6 +2076,17 @@ class VideoConverterApp:
         )
         self.play_output_button.pack(side="left", expand=True, fill="x", padx=(2, 2))
         self.play_output_button.configure(command=self._play_output_file)
+
+        self.play10s_button = ctk.CTkButton(
+            self.play_buttons_frame,
+            text="Play 10s Preview",
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            height=40,
+        )
+        self.play10s_button.pack(side="left", expand=True, fill="x", padx=(2, 2))
+        self.play10s_button.configure(command=self._create_10s_preview)
 
         self.batch_convert_button = ctk.CTkButton(
             self.play_buttons_frame,
@@ -2152,6 +2181,27 @@ class VideoConverterApp:
             and self.batch_converter_window.is_converting
         ):
             self.batch_converter_window.cancel_batch_conversion()
+
+    def _cancel_preview(self):
+        """Cancel preview creation"""
+        if self.is_creating_preview and self.preview_process:
+            try:
+                self.preview_process.terminate()
+                self.preview_process.wait(timeout=2)
+            except (subprocess.TimeoutExpired, Exception):
+                try:
+                    self.preview_process.kill()
+                except Exception:
+                    pass
+
+            self.is_creating_preview = False
+            self.preview_process = None
+            self.status_text.set("Preview creation cancelled")
+            self.ffmpeg_output.set("")
+            self.progress_frame.grid_remove()
+            self.play10s_button.configure(
+                text="Play 10s Preview", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
+            )
 
     def _open_batch_converter(self):
         if (
@@ -2394,11 +2444,18 @@ class VideoConverterApp:
 
     def _create_10s_preview(self):
         """Create a 10-second preview with current settings"""
+        if self.is_creating_preview:
+            # If preview is being created, cancel it
+            self._cancel_preview()
+            return
+
+        self.preview_process = None
+
         if self.trim_streamcopy.get():
             messagebox.showerror("Error", "Preview is not available in Streamcopy mode")
             return
 
-        if self.is_converting or self.is_creating_preview:
+        if self.is_converting:
             messagebox.showerror("Error", "Please wait until current process completes")
             return
 
@@ -2520,10 +2577,16 @@ class VideoConverterApp:
             self.progress_label.configure(text="0%")
             self.progress_frame.grid()
 
+            # Update button to show cancel state
+            self.play10s_button.configure(
+                text="Cancel Preview", fg_color=ACCENT_RED, hover_color=HOVER_RED
+            )
+
             # Start encoding in separate thread
             preview_thread = Thread(
                 target=self._run_preview_encoding, args=(encode_cmd, temp_encoded)
             )
+            preview_thread.daemon = True
             preview_thread.start()
 
         except Exception as e:
@@ -2793,6 +2856,10 @@ class VideoConverterApp:
                 if custom_fps:
                     self.custom_fps.set(custom_fps)
 
+                fps_mode = settings.get("fps_mode", "")
+                if fps_mode:
+                    self.fps_mode.set(fps_mode)
+
                 video_format_option = settings.get("video_format_option", "")
                 if video_format_option:
                     self.video_format_option.set(video_format_option)
@@ -2917,6 +2984,7 @@ class VideoConverterApp:
                 # FPS and scaling settings
                 "fps_option": self.fps_option.get(),
                 "custom_fps": self.custom_fps.get(),
+                "fps_mode": self.fps_mode.get(),
                 "video_format_option": self.video_format_option.get(),
                 "custom_video_width": self.custom_video_width.get(),
                 # Encoder Flags
@@ -2925,7 +2993,7 @@ class VideoConverterApp:
                 "preanalysis": self.preanalysis.get(),
                 "max_pa": self.max_pa.get(),
                 "smart_access_video": self.smart_access_video.get(),
-                "version": "1.1.5",
+                "version": "1.1.6",
             }
 
             with open(settings_file, "w", encoding="utf-8") as file:
@@ -3219,6 +3287,9 @@ class VideoConverterApp:
 
         if vf_filters:
             command.extend(["-vf", ",".join(vf_filters)])
+
+        if self.fps_mode.get() != "auto":
+            command.extend(["-fps_mode", self.fps_mode.get()])
 
         # AMF encoder specific settings
         codec_map = {"hevc": "hevc_amf", "av1": "av1_amf"}
@@ -4426,22 +4497,37 @@ class VideoConverterApp:
                 encoding="utf-8",
                 errors="replace",
             )
+            self.preview_process = process
 
             # Process output in real-time
             for line in process.stdout:
+                if not self.is_creating_preview:  # Check if cancelled
+                    process.terminate()
+                    break
+
                 if line:
-                    self.master.after(0, lambda: self.ffmpeg_output.set(line))
-                    self.master.after(0, lambda: self._update_preview_progress(line))
+                    self.master.after(
+                        0, lambda line_text=line: self.ffmpeg_output.set(line_text)
+                    )
+                    self.master.after(
+                        0,
+                        lambda line_text=line: self._update_preview_progress(line_text),
+                    )
 
             process.wait()
 
-            if process.returncode == 0:
+            if process.returncode == 0 and self.is_creating_preview:
                 self.master.after(
                     0, lambda: self.status_text.set("Preview created successfully!")
                 )
                 self.master.after(0, lambda: self.ffmpeg_output.set(""))
                 # Play the result
-                os.startfile(output_path)
+                if os.path.exists(output_path):
+                    os.startfile(output_path)
+            elif not self.is_creating_preview:
+                self.master.after(
+                    0, lambda: self.status_text.set("Preview creation cancelled")
+                )
             else:
                 self.master.after(
                     0, lambda: self.status_text.set("Preview creation failed!")
@@ -4453,6 +4539,16 @@ class VideoConverterApp:
         finally:
             self.master.after(0, lambda: self.progress_frame.grid_remove())
             self.is_creating_preview = False
+            self.preview_process = None
+            # Reset button to normal state
+            self.master.after(
+                0,
+                lambda: self.play10s_button.configure(
+                    text="Play 10s Preview",
+                    fg_color=ACCENT_GREY,
+                    hover_color=HOVER_GREY,
+                ),
+            )
 
     def _update_preview_progress(self, line):
         """Update progress for preview encoding"""
