@@ -36,6 +36,79 @@ TEXT_COLOR_B = "#000000"
 PLACEHOLDER_COLOR = "#a0a0a0"
 
 
+class TextCheckbox(ctk.CTkFrame):
+    def __init__(self, master=None, text="", variable=None, command=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.configure(fg_color="transparent")
+
+        self.var = variable if variable is not None else ctk.BooleanVar()
+        self.command = command
+        self.text = text
+
+        self.unchecked_char = "▼"
+        self.checked_char = "▲"
+
+        # Main container for checkbox and text
+        self.container = ctk.CTkFrame(self, fg_color="transparent")
+        self.container.pack(anchor="w", fill="x")
+
+        # Checkbox as a label
+        self.checkbox_label = ctk.CTkLabel(
+            self.container,
+            text=self.unchecked_char,
+            width=24,
+            height=24,
+            corner_radius=6,
+            fg_color=ACCENT_RED,
+            text_color=TEXT_COLOR_W,
+            cursor="hand2",
+        )
+        self.checkbox_label.pack(side="left", padx=(0, 8))
+
+        # Text label
+        self.text_label = ctk.CTkLabel(
+            self.container,
+            text=text,
+            cursor="hand2",
+        )
+        self.text_label.pack(side="left", fill="x", expand=True)
+
+        # Bind click events to both labels
+        self.checkbox_label.bind("<Button-1>", self.toggle)
+        self.text_label.bind("<Button-1>", self.toggle)
+
+        # Add hover effects
+        self.checkbox_label.bind("<Enter>", self._on_hover)
+        self.checkbox_label.bind("<Leave>", self._on_leave)
+        self.text_label.bind("<Enter>", self._on_hover)
+        self.text_label.bind("<Leave>", self._on_leave)
+
+        self.var.trace_add("write", self.update_display)
+
+    def _on_hover(self, event):
+        self.checkbox_label.configure(fg_color=HOVER_RED)
+
+    def _on_leave(self, event):
+        self.checkbox_label.configure(fg_color=ACCENT_RED)
+
+    def toggle(self, event=None):
+        self.var.set(not self.var.get())
+        if self.command:
+            self.command()
+
+    def update_display(self, *args):
+        if self.var.get():
+            self.checkbox_label.configure(text=self.checked_char)
+        else:
+            self.checkbox_label.configure(text=self.unchecked_char)
+
+    def get(self):
+        return self.var.get()
+
+    def set(self, value):
+        self.var.set(value)
+
+
 # DRAG N DROP FILES
 class DropTarget:
     def __init__(self, hwnd, callback):
@@ -527,7 +600,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.1.7")
+        master.title("RedFFmpegatron 1.1.8")
         master.geometry("800x700")
         master.minsize(800, 700)
         master.maxsize(800, 900)
@@ -920,13 +993,11 @@ class VideoConverterApp:
         av1_rb.pack(side="left", padx=5)
 
         # Encoder Options
-        encoder_options_frame_toggle = ctk.CTkCheckBox(
+        encoder_options_frame_toggle = TextCheckbox(
             main_frame,
             text="Advanced Encoder Settings",
             variable=self.enable_encoder_options,
             command=self._toggle_encoder_options_frame,
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
         )
         encoder_options_frame_toggle.grid(row=5, column=0, sticky="w", padx=10, pady=5)
 
@@ -1253,13 +1324,11 @@ class VideoConverterApp:
         ).grid(row=4, column=2, columnspan=2, sticky="w", padx=15, pady=2)
 
         # FPS and Scaling
-        fps_scale_frame_toggle = ctk.CTkCheckBox(
+        fps_scale_frame_toggle = TextCheckbox(
             main_frame,
             text="FPS and Scaling Settings",
             variable=self.enable_fps_scale_options,
             command=self._toggle_fps_scale_options_frame,
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
         )
         fps_scale_frame_toggle.grid(row=7, column=0, sticky="w", padx=10, pady=5)
 
@@ -1522,13 +1591,11 @@ class VideoConverterApp:
         self.videosr_options_frame.grid_remove()
 
         # Audio Settings Toggle
-        audio_frame_toggle = ctk.CTkCheckBox(
+        audio_frame_toggle = TextCheckbox(
             main_frame,
             text="Audio Settings",
             variable=self.enable_audio_options,
             command=self._toggle_audio_options_frame,
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
         )
         audio_frame_toggle.grid(row=9, column=0, sticky="w", padx=10, pady=5)
 
@@ -1601,13 +1668,11 @@ class VideoConverterApp:
             rb.grid(row=1, column=i + 2, sticky="w", padx=15, pady=10)
 
         # Additional Options
-        additional_options_toggle = ctk.CTkCheckBox(
+        additional_options_toggle = TextCheckbox(
             main_frame,
             text="Additional Options (Trimming)",
             variable=self.enable_additional_options,
             command=self._toggle_additional_options_frame,
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
         )
         additional_options_toggle.grid(row=11, column=0, sticky="w", padx=10, pady=5)
         self.additional_options_frame = ctk.CTkFrame(main_frame, fg_color=SECONDARY_BG)
@@ -2009,13 +2074,11 @@ class VideoConverterApp:
         ).pack(side="left")
 
         # Presets Section
-        presets_frame_toggle = ctk.CTkCheckBox(
+        presets_frame_toggle = TextCheckbox(
             main_frame,
             text="Presets",
             variable=self.enable_presets,
             command=self._toggle_presets_frame,
-            fg_color=ACCENT_RED,
-            hover_color=HOVER_RED,
         )
         presets_frame_toggle.grid(row=13, column=0, sticky="w", padx=10, pady=5)
         self.presets_frame = ctk.CTkFrame(main_frame, fg_color=SECONDARY_BG)
@@ -3113,7 +3176,7 @@ class VideoConverterApp:
                 "saved_additional_options": self.saved_additional_options.get(),
                 "saved_additional_filter_options": self.saved_additional_filter_options.get(),
                 "saved_additional_audio_filter_options": self.saved_additional_audio_filter_options.get(),
-                "version": "1.1.7",
+                "version": "1.1.8",
             }
 
             with open(settings_file, "w", encoding="utf-8") as file:
@@ -3356,54 +3419,52 @@ class VideoConverterApp:
                 raise ValueError("Video bitrate must be a number.")
 
         vf_filters = []
-        if self.enable_fps_scale_options.get():
-            fps_num = self.fps_option.get()
-            if fps_num == "custom":
-                fps_num = self.custom_fps.get()
-                if not fps_num:
-                    raise ValueError("Please specify custom FPS.")
-            if fps_num != "source":
-                vf_filters.append(f"fps={fps_num}")
-            scale_width = self.video_format_option.get()
-            if scale_width == "custom":
-                scale_width = self.custom_video_width.get()
-                if not scale_width:
-                    raise ValueError("Please specify custom video width.")
-            if scale_width != "source":
-                if self.enable_videosr.get():
-                    # Use VideoSR scaling with pixel format
+        fps_num = self.fps_option.get()
+        if fps_num == "custom":
+            fps_num = self.custom_fps.get()
+            if not fps_num:
+                raise ValueError("Please specify custom FPS.")
+        if fps_num != "source":
+            vf_filters.append(f"fps={fps_num}")
+        scale_width = self.video_format_option.get()
+        if scale_width == "custom":
+            scale_width = self.custom_video_width.get()
+            if not scale_width:
+                raise ValueError("Please specify custom video width.")
+        if scale_width != "source":
+            if self.enable_videosr.get():
+                # Use VideoSR scaling with pixel format
+                pixel_format = self.videosr_pixel_format.get()
+                if pixel_format != "same":
+                    vf_filters.insert(
+                        0, f"format={pixel_format},hwupload=extra_hw_frames=64"
+                    )
+                    height = round(int(scale_width) * 9 / 16)
+                    height = height + (height % 2)
+                    sr_filter = (
+                        f"sr_amf=w={scale_width}:h={height}:"
+                        f"algorithm={self.videosr_algorithm.get()}"
+                    )
+                    if self.videosr_sharpness.get() != "-1":
+                        sr_filter += f":sharpness={self.videosr_sharpness.get()}"
+                    if self.videosr_keep_ratio.get():
+                        sr_filter += ":keep-ratio=1"
+                    if self.videosr_fill.get():
+                        sr_filter += ":fill=1"
+
+                    # hwdownload and format to the end
                     pixel_format = self.videosr_pixel_format.get()
-                    if pixel_format != "same":
-                        vf_filters.insert(
-                            0, f"format={pixel_format},hwupload=extra_hw_frames=64"
-                        )
-                        height = round(int(scale_width) * 9 / 16)
-                        height = height + (height % 2)
-                        sr_filter = (
-                            f"sr_amf=w={scale_width}:h={height}:"
-                            f"algorithm={self.videosr_algorithm.get()}"
-                        )
-                        if self.videosr_sharpness.get() != "-1":
-                            sr_filter += f":sharpness={self.videosr_sharpness.get()}"
-                        if self.videosr_keep_ratio.get():
-                            sr_filter += ":keep-ratio=1"
-                        if self.videosr_fill.get():
-                            sr_filter += ":fill=1"
+                    sr_filter += f",hwdownload,format={pixel_format}"
 
-                        # hwdownload and format to the end
-                        pixel_format = self.videosr_pixel_format.get()
-                        sr_filter += f",hwdownload,format={pixel_format}"
+                    vf_filters.append(sr_filter)
+            else:
+                # Use standard scaling
+                interp_flag = self.interpolation_algo.get()
+                vf_filters.append(f"scale={scale_width}:-2:flags={interp_flag}")
 
-                        vf_filters.append(sr_filter)
-                else:
-                    # Use standard scaling
-                    interp_flag = self.interpolation_algo.get()
-                    vf_filters.append(f"scale={scale_width}:-2:flags={interp_flag}")
-
-        if self.enable_additional_options.get():
-            addvf_val = self.additional_filter_options.get().strip()
-            if addvf_val and addvf_val != self.additional_filter_options_placeholder:
-                vf_filters.append(addvf_val)
+        addvf_val = self.additional_filter_options.get().strip()
+        if addvf_val and addvf_val != self.additional_filter_options_placeholder:
+            vf_filters.append(addvf_val)
 
         if vf_filters:
             command.extend(["-vf", ",".join(vf_filters)])
@@ -3527,13 +3588,12 @@ class VideoConverterApp:
             command.extend(other_additional_options)
 
         # Add audio filters if any
-        if self.enable_additional_options.get():
-            add_af_val = self.additional_audio_filter_options.get().strip()
-            if (
-                add_af_val
-                and add_af_val != self.additional_audio_filter_options_placeholder
-            ):
-                command.extend(["-af", add_af_val])
+        add_af_val = self.additional_audio_filter_options.get().strip()
+        if (
+            add_af_val
+            and add_af_val != self.additional_audio_filter_options_placeholder
+        ):
+            command.extend(["-af", add_af_val])
 
         # Audio settings
         audio_opt = self.audio_option.get()
