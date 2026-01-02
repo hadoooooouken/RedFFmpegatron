@@ -105,11 +105,11 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
       --include-data-file=rff-about.txt=./rff-about.txt ^
       --include-data-file=rff-license.txt=./rff-license.txt ^
       --product-name="RedFFmpegatron" ^
-      --product-version="1.1.8" ^
-      --file-version="1.1.8" ^
+      --product-version="1.1.9" ^
+      --file-version="1.1.9" ^
       --file-description="RedFFmpegatron" ^
       --company-name="Deepseek Enjoyer" ^
-      --copyright="Copyright (C) 2025 hadouken" ^
+      --copyright="Copyright (C) 2026 hadouken" ^
       --output-dir=build "RedFFmpegatron.py"
     ```
     The compiled executable will be found in the `build` directory specified by `--output-dir`.
@@ -158,7 +158,7 @@ If you have a suggestion that would make this better, you can simply open an iss
 
 RedFFmpegatron is licensed under the MIT License — Modified for RedFFmpegatron.
 
-© 2025 hadouken (GitLab) / hadoooooouken (GitHub)
+© 2026 hadouken (GitLab) / hadoooooouken (GitHub)
 
 You are free to use, copy, modify, merge, publish, distribute, sublicense,
 and/or sell copies of this software, **provided that**:

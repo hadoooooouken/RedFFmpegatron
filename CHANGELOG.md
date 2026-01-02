@@ -1,5 +1,8 @@
 # RedFFmpegatron - Changelog
 
+## [1.1.9] - 2026-01-02
+- UI/UX fixes.
+
 ## [1.1.8] - 2025-11-15
 - UI/UX fixes and updates.
 
