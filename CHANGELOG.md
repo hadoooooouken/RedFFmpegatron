@@ -1,5 +1,10 @@
 # RedFFmpegatron - Changelog
 
+## [1.2.0] - 2026-01-06
+- HighDPI support;
+- FFmpeg Command Preview: fixed "Copy to Clipboard";
+- FFmpeg Command Preview: fixed "Apply Changes".
+
 ## [1.1.9] - 2026-01-02
 - UI/UX fixes.
 
