@@ -1,5 +1,10 @@
 # RedFFmpegatron - Changelog
 
+## [1.2.1] - 2026-02-19
+- Added the ability to create custom presets;
+- "Screen Record" now respects the selected FPS Mode;
+- Additional Options: improved text paste handling (custom filters) regardless of the current system keyboard layout.
+
 ## [1.2.0] - 2026-01-06
 - HighDPI support;
 - FFmpeg Command Preview: fixed "Copy to Clipboard";
