@@ -1,5 +1,5 @@
 # IMPORTS
-import ctypes
+import ctypes.wintypes
 import os
 import subprocess
 import sys
@@ -15,16 +15,94 @@ from tkinter import filedialog, messagebox, simpledialog
 from winsound import MB_ICONASTERISK, MessageBeep
 
 import customtkinter as ctk
-import win32clipboard
 from PIL import Image
-from win32api import DragFinish, DragQueryFile
-from win32con import GWL_WNDPROC, WM_DROPFILES
-from win32gui import CallWindowProc, DragAcceptFiles, SetWindowLong
+
+# Win32 constants
+GWL_WNDPROC = -4
+WM_DROPFILES = 0x0233
+CF_UNICODETEXT = 13
+GMEM_MOVEABLE = 0x0002
+
+# Win32 callback type for window procedures
+WNDPROC = ctypes.WINFUNCTYPE(
+    ctypes.c_long,
+    ctypes.wintypes.HWND,
+    ctypes.wintypes.UINT,
+    ctypes.wintypes.WPARAM,
+    ctypes.wintypes.LPARAM,
+)
+
+# Shell32 — Drag-and-Drop
+_shell32 = ctypes.windll.shell32
+_shell32.DragAcceptFiles.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.BOOL]
+_shell32.DragAcceptFiles.restype = None
+_shell32.DragFinish.argtypes = [ctypes.wintypes.HANDLE]
+_shell32.DragFinish.restype = None
+_shell32.DragQueryFileW.argtypes = [
+    ctypes.wintypes.HANDLE,
+    ctypes.wintypes.UINT,
+    ctypes.wintypes.LPWSTR,
+    ctypes.wintypes.UINT,
+]
+_shell32.DragQueryFileW.restype = ctypes.wintypes.UINT
+
+# User32 — Window Proc & Clipboard
+_user32 = ctypes.windll.user32
+_user32.SetWindowLongPtrW.argtypes = [
+    ctypes.wintypes.HWND,
+    ctypes.c_int,
+    ctypes.c_void_p,
+]
+_user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+_user32.CallWindowProcW.argtypes = [
+    ctypes.c_void_p,
+    ctypes.wintypes.HWND,
+    ctypes.wintypes.UINT,
+    ctypes.wintypes.WPARAM,
+    ctypes.wintypes.LPARAM,
+]
+_user32.CallWindowProcW.restype = ctypes.c_long
+_user32.OpenClipboard.argtypes = [ctypes.wintypes.HWND]
+_user32.OpenClipboard.restype = ctypes.wintypes.BOOL
+_user32.CloseClipboard.argtypes = []
+_user32.CloseClipboard.restype = ctypes.wintypes.BOOL
+_user32.EmptyClipboard.argtypes = []
+_user32.EmptyClipboard.restype = ctypes.wintypes.BOOL
+_user32.SetClipboardData.argtypes = [ctypes.wintypes.UINT, ctypes.wintypes.HANDLE]
+_user32.SetClipboardData.restype = ctypes.wintypes.HANDLE
+
+# Kernel32 — GlobalAlloc for clipboard
+_kernel32 = ctypes.windll.kernel32
+_kernel32.GlobalAlloc.argtypes = [ctypes.wintypes.UINT, ctypes.c_size_t]
+_kernel32.GlobalAlloc.restype = ctypes.wintypes.HANDLE
+_kernel32.GlobalLock.argtypes = [ctypes.wintypes.HANDLE]
+_kernel32.GlobalLock.restype = ctypes.c_void_p
+_kernel32.GlobalUnlock.argtypes = [ctypes.wintypes.HANDLE]
+_kernel32.GlobalUnlock.restype = ctypes.wintypes.BOOL
+
+
+def _set_clipboard_text(text):
+    """Copy Unicode text to the Windows clipboard using ctypes."""
+    encoded = text.encode("utf-16-le") + b"\x00\x00"
+    h = _kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
+    if not h:
+        return False
+    ptr = _kernel32.GlobalLock(h)
+    if not ptr:
+        return False
+    ctypes.memmove(ptr, encoded, len(encoded))
+    _kernel32.GlobalUnlock(h)
+    if not _user32.OpenClipboard(None):
+        return False
+    _user32.EmptyClipboard()
+    _user32.SetClipboardData(CF_UNICODETEXT, h)
+    _user32.CloseClipboard()
+    return True
 
 
 def get_icon_path():
     if getattr(sys, "frozen", False):
-        base_path = sys._MEIPASS
+        base_path = os.path.dirname(sys.executable)
     else:
         base_path = os.path.dirname(__file__)
     return os.path.join(base_path, "rff.ico")
@@ -50,8 +128,9 @@ def get_real_dpi():
         if dpi == 0:
             dpi = user32.GetDpiForSystem()
     except Exception:
+        gdi32 = ctypes.windll.gdi32
         hdc = user32.GetDC(0)
-        dpi = user32.GetDeviceCaps(hdc, 88)
+        dpi = gdi32.GetDeviceCaps(hdc, 88)
         user32.ReleaseDC(0, hdc)
 
     return dpi
@@ -164,30 +243,37 @@ class DropTarget:
     def __init__(self, hwnd, callback):
         self.hwnd = hwnd
         self.callback = callback
-        DragAcceptFiles(self.hwnd, True)
+        _shell32.DragAcceptFiles(self.hwnd, True)
 
-        # Use SetWindowLong for compatibility
-        self.old_wnd_proc = SetWindowLong(self.hwnd, GWL_WNDPROC, self._wnd_proc)
+        # Wrap _wnd_proc in WNDPROC and keep a reference to prevent GC
+        self._wndproc_func = WNDPROC(self._wnd_proc)
+        self.old_wnd_proc = _user32.SetWindowLongPtrW(
+            self.hwnd,
+            GWL_WNDPROC,
+            ctypes.cast(self._wndproc_func, ctypes.c_void_p).value,
+        )
         self._self_ref = self  # important
 
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
         if msg == WM_DROPFILES:
             try:
                 hdrop = wparam
-                file_path = DragQueryFile(hdrop, 0)
+                buf = ctypes.create_unicode_buffer(260)
+                _shell32.DragQueryFileW(hdrop, 0, buf, 260)
+                file_path = buf.value
                 if self.callback:
                     self.callback(file_path)
-                DragFinish(hdrop)
+                _shell32.DragFinish(hdrop)
             except Exception as e:
                 print(f"Error handling drop: {e}")
             return 0
-        return CallWindowProc(self.old_wnd_proc, hwnd, msg, wparam, lparam)
+        return _user32.CallWindowProcW(self.old_wnd_proc, hwnd, msg, wparam, lparam)
 
     def cleanup(self):
         """Clean up the drop target - call this before destroying the window"""
         try:
             if hasattr(self, "old_wnd_proc") and self.old_wnd_proc:
-                SetWindowLong(self.hwnd, GWL_WNDPROC, self.old_wnd_proc)
+                _user32.SetWindowLongPtrW(self.hwnd, GWL_WNDPROC, self.old_wnd_proc)
         except Exception:
             # Silently ignore cleanup errors — not critical
             pass
@@ -649,7 +735,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.2.2")
+        master.title("RedFFmpegatron 1.2.3")
 
         dpi = get_real_dpi()
         scaling = int(round((dpi / 96) * 100))
@@ -723,20 +809,6 @@ class VideoConverterApp:
                 self.ffprobe_path = self._find_executable("ffprobe.exe")
         else:
             self.ffprobe_path = self._find_executable("ffprobe.exe")
-
-        saved_path = self._load_settings()
-
-        if saved_path:
-            self.ffmpeg_path = saved_path
-        else:
-            if self.ffmpeg_path:
-                ffprobe_path = os.path.join(
-                    os.path.dirname(self.ffmpeg_path), "ffprobe.exe"
-                )
-                if os.path.exists(ffprobe_path):
-                    self.ffprobe_path = ffprobe_path
-                else:
-                    self.ffprobe_path = self._find_executable("ffprobe.exe")
 
         self._update_codec_settings()
 
@@ -1962,25 +2034,14 @@ class VideoConverterApp:
 
         ctk.CTkButton(
             quick_buttons_frame,
-            text="Speed up X2",
-            command=lambda: self._set_speed_filter("2.0"),
+            text="Brightness",
+            command=lambda: self._add_video_filter("eq=brightness=-0.15"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        ctk.CTkButton(
-            quick_buttons_frame,
-            text="Slow down X2",
-            command=lambda: self._set_speed_filter("0.5"),
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
-            text_color=TEXT_COLOR_B,
-            width=106,
-        ).pack(side="left", padx=(0, 10))
-
-        # Sharpness button
         ctk.CTkButton(
             quick_buttons_frame,
             text="Sharpness",
@@ -1991,22 +2052,30 @@ class VideoConverterApp:
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Saturation button
         ctk.CTkButton(
             quick_buttons_frame,
-            text="Saturation",
-            command=lambda: self._add_video_filter("eq=saturation=1.15"),
+            text="H-Flip",
+            command=lambda: self._add_video_filter("hflip"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Denoise button
         ctk.CTkButton(
             quick_buttons_frame,
-            text="Denoise",
-            command=lambda: self._add_video_filter("hqdn3d=2:1.5:3:2.25"),
+            text="Speed up X2",
+            command=lambda: self._set_speed_filter("2.0"),
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            width=106,
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            quick_buttons_frame,
+            text="Audio fix",
+            command=lambda: self._add_audio_filter("loudnorm=I=-16:TP=-1.5:LRA=11"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
@@ -2031,70 +2100,60 @@ class VideoConverterApp:
             row=6, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
         )
 
-        # Deshake video
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="Deshake",
-            command=lambda: self._add_video_filter(
-                "deshake=rx=32:ry=32:edge=3:blocksize=32:contrast=200:search=0"
-            ),
+            text="Saturation",
+            command=lambda: self._add_video_filter("eq=saturation=1.15"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Frame drop threshold button
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="Drop thresh",
-            command=lambda: self._add_additional_option("-frame_drop_threshold 0.5"),
+            text="Denoise",
+            command=lambda: self._add_video_filter("hqdn3d=2:1.5:3:2.25"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Gamma RGB
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="Gamma RGB",
-            command=lambda: self._add_video_filter(
-                "eq=gamma_r=1.0:gamma_g=1.0:gamma_b=1.0:gamma_weight=1.0"
-            ),
+            text="V-Flip",
+            command=lambda: self._add_video_filter("vflip"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Brightness button
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="Brightness",
-            command=lambda: self._add_video_filter("eq=brightness=-0.15"),
+            text="Slow down X2",
+            command=lambda: self._set_speed_filter("0.5"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Audio fix button
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="Audio fix",
-            command=lambda: self._add_audio_filter("loudnorm=I=-16:TP=-1.5:LRA=11"),
+            text="Stereo out",
+            command=self._set_stereo_out,
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # H-Flip button
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="H-Flip",
-            command=lambda: self._add_video_filter("hflip"),
+            text="Force 8 bit",
+            command=lambda: self._add_additional_option("-pix_fmt:v nv12"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
@@ -2108,29 +2167,52 @@ class VideoConverterApp:
             row=7, column=0, columnspan=3, sticky="w", padx=10, pady=(0, 10)
         )
 
-        # Force 8 bit button
         ctk.CTkButton(
             quick_buttons_frame_3,
-            text="Force 8 bit",
-            command=lambda: self._add_additional_option("-pix_fmt:v nv12"),
+            text="Gamma RGB",
+            command=lambda: self._add_video_filter(
+                "eq=gamma_r=1.0:gamma_g=1.0:gamma_b=1.0:gamma_weight=1.0"
+            ),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Force 10 bit button
         ctk.CTkButton(
             quick_buttons_frame_3,
-            text="Force 10 bit",
-            command=lambda: self._add_additional_option("-pix_fmt:v p010le"),
+            text="Deshake",
+            command=lambda: self._add_video_filter(
+                "deshake=rx=32:ry=32:edge=3:blocksize=32:contrast=200:search=0"
+            ),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # HDR to SDR button
+        ctk.CTkButton(
+            quick_buttons_frame_3,
+            text="Rotate 90°",
+            command=lambda: self._add_video_filter("transpose=1"),
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            width=106,
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            quick_buttons_frame_3,
+            text="Crop to 16:9",
+            command=lambda: self._add_video_filter(
+                "crop=iw:min(ih\\,iw*9/16):0:(ih-min(ih\\,iw*9/16))/2"
+            ),
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            width=106,
+        ).pack(side="left", padx=(0, 10))
+
         ctk.CTkButton(
             quick_buttons_frame_3,
             text="HDR to SDR",
@@ -2145,35 +2227,10 @@ class VideoConverterApp:
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        # Crop to 16:9
         ctk.CTkButton(
             quick_buttons_frame_3,
-            text="Crop to 16:9",
-            command=lambda: self._add_video_filter(
-                "crop=iw:min(ih\\,iw*9/16):0:(ih-min(ih\\,iw*9/16))/2"
-            ),
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
-            text_color=TEXT_COLOR_B,
-            width=106,
-        ).pack(side="left", padx=(0, 10))
-
-        # Rotate / transponse
-        ctk.CTkButton(
-            quick_buttons_frame_3,
-            text="Rotate",
-            command=lambda: self._add_video_filter("transpose=1"),
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
-            text_color=TEXT_COLOR_B,
-            width=106,
-        ).pack(side="left", padx=(0, 10))
-
-        # V-Flip button
-        ctk.CTkButton(
-            quick_buttons_frame_3,
-            text="V-Flip",
-            command=lambda: self._add_video_filter("vflip"),
+            text="Force 10 bit",
+            command=lambda: self._add_additional_option("-pix_fmt:v p010le"),
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
@@ -2854,7 +2911,7 @@ class VideoConverterApp:
             "custom_preset_selected": self.custom_preset_name.get()
             if self.selected_preset.get() == "custom"
             else "",
-            "version": "1.2.2",
+            "version": "1.2.3",
         }
         return settings
 
@@ -2985,17 +3042,7 @@ class VideoConverterApp:
             desktop = os.path.join(os.path.expanduser("~"), "Desktop")
             now = datetime.now()
             date_str = now.strftime("%d_%m_%y-%H_%M")
-
-            # Get extension from current output or use mp4
-            current_output = self.output_file.get()
-            if current_output:
-                ext = os.path.splitext(current_output)[1]
-                if not ext:
-                    ext = ".mp4"
-            else:
-                ext = ".mp4"
-
-            output_file = os.path.join(desktop, f"screen_record-{date_str}{ext}")
+            output_file = os.path.join(desktop, f"screen_record-{date_str}.mp4")
 
         # Get FPS - use 60 if source or not specified
         fps = self.fps_option.get()
@@ -3144,7 +3191,9 @@ class VideoConverterApp:
                     break
 
                 if self.is_recording:  # Check again in case it changed
-                    self.master.after(0, lambda: self.ffmpeg_output.set(line.strip()))
+                    self.master.after(
+                        0, lambda l=line: self.ffmpeg_output.set(l.strip())
+                    )
 
             except Exception:
                 break
@@ -3701,30 +3750,7 @@ class VideoConverterApp:
             command.extend(["-c:v", "copy"])
 
             # Audio handling
-            audio_opt = self.audio_option.get()
-            if audio_opt == "disable":
-                command.append("-an")
-            elif audio_opt == "copy":
-                command.extend(["-c:a", "copy"])
-            elif audio_opt == "aac_96k":
-                command.extend(["-c:a", "aac", "-b:a", "96k"])
-            elif audio_opt == "aac_160k":
-                command.extend(["-c:a", "aac", "-b:a", "160k"])
-            elif audio_opt == "aac_256k":
-                command.extend(["-c:a", "aac", "-b:a", "256k"])
-            elif audio_opt == "opus_96k":
-                command.extend(["-c:a", "libopus", "-b:a", "96k"])
-            elif audio_opt == "opus_160k":
-                command.extend(["-c:a", "libopus", "-b:a", "160k"])
-            elif audio_opt == "opus_256k":
-                command.extend(["-c:a", "libopus", "-b:a", "256k"])
-            elif audio_opt == "custom":
-                abitrate_val = self.custom_abitrate.get()
-                try:
-                    int(abitrate_val)
-                    command.extend(["-c:a", "aac", "-b:a", f"{abitrate_val}k"])
-                except ValueError:
-                    raise ValueError("Custom audio bitrate must be a number.")
+            self._append_audio_options(command)
 
             command.append(output_f)
             return command
@@ -3842,7 +3868,10 @@ class VideoConverterApp:
         if addvf_val and addvf_val != self.additional_filter_options_placeholder:
             vf_filters.append(addvf_val)
 
-        if vf_filters:
+        # Skip -vf if user specified -filter_complex in Additional Options
+        has_filter_complex = "-filter_complex" in (other_additional_options or [])
+
+        if vf_filters and not has_filter_complex:
             command.extend(["-vf", ",".join(vf_filters)])
 
         if self.fps_mode.get() != "auto":
@@ -3859,11 +3888,7 @@ class VideoConverterApp:
             command.extend(["-preset:v", self.preset.get()])
 
         if self.profile.get() != "auto":
-            codec = self.video_codec.get()
-            if codec in ["hevc", "hevc_amf"]:
-                command.extend(["-profile:v", self.profile.get()])
-            else:
-                command.extend(["-profile:v", self.profile.get()])
+            command.extend(["-profile:v", self.profile.get()])
 
         if self.video_codec.get() == "hevc" and self.profile_tier.get() != "auto":
             command.extend(["-profile_tier:v", self.profile_tier.get()])
@@ -3972,6 +3997,14 @@ class VideoConverterApp:
             command.extend(["-af", add_af_val])
 
         # Audio settings
+        self._append_audio_options(command)
+
+        command.append(output_f)
+
+        return command
+
+    def _append_audio_options(self, command):
+        """Append audio codec/bitrate flags to the command list."""
         audio_opt = self.audio_option.get()
         if audio_opt == "disable":
             command.append("-an")
@@ -3996,10 +4029,6 @@ class VideoConverterApp:
                 command.extend(["-c:a", "aac", "-b:a", f"{abitrate_val}k"])
             except ValueError:
                 raise ValueError("Custom audio bitrate must be a number.")
-
-        command.append(output_f)
-
-        return command
 
     def _run_ffmpeg(self, command):
         startupinfo = None
@@ -4026,8 +4055,8 @@ class VideoConverterApp:
                 line = line.strip()
                 if line:
                     last_line = line
-                    self.master.after(0, lambda: self.ffmpeg_output.set(line))
-                    self.master.after(0, lambda: self._update_progress(line))
+                    self.master.after(0, lambda l=line: self.ffmpeg_output.set(l))
+                    self.master.after(0, lambda l=line: self._update_progress(l))
             self.conversion_process.wait()
             if self.conversion_process.returncode == 0:
                 self.master.after(
@@ -4840,9 +4869,6 @@ class VideoConverterApp:
         self._draw_trim_slider()
 
     def _on_slider_release(self, event):
-        # Mark slider as released
-        self.is_slider_dragging = False
-
         # Cancel any scheduled preview job
         if getattr(self, "preview_job", None):
             try:
@@ -5346,6 +5372,13 @@ class VideoConverterApp:
 
     # PRESETS & UI TOGGLES
     def _apply_preset(self, preset_name):
+
+        # Clear Additional Options (Trimming)
+        self._clear_all_filters()
+        self._reset_trim_slider()
+        self.trim_streamcopy.set(False)
+        self.precise_trim.set(False)
+
         if preset_name == "none":
             # Reset to default settings
             self.enable_encoder_options.set(True)
@@ -5551,12 +5584,6 @@ class VideoConverterApp:
             )
             self._save_settings()
             self.selected_preset.set("hdq")
-
-        # Update UI
-        # self._toggle_encoder_options_frame()
-        # self._toggle_fps_scale_options_frame()
-        # self._toggle_additional_options_frame()
-        # self._update_window_size()
 
     def _apply_auto_encoder_settings(self):
         """Set all option menus with 'auto' to auto and uncheck all checkboxes."""
@@ -5767,9 +5794,17 @@ class VideoConverterApp:
                     has_input = True
                     input_file = args[i + 1]
 
+            # Output file is the last non-flag argument (skip values of known options)
+            skip_next = False
             for i in range(1, len(args)):
-                if not args[i].startswith("-") and (i == 0 or args[i - 1] != "-i"):
-                    output_file = args[i]
+                if skip_next:
+                    skip_next = False
+                    continue
+                if args[i].startswith("-"):
+                    # Most ffmpeg flags take one value argument after them
+                    skip_next = True
+                    continue
+                output_file = args[i]
 
             if not has_input:
                 raise ValueError("Missing input file (-i option)")
@@ -5910,9 +5945,6 @@ class VideoConverterApp:
             if os.path.exists(current_text) and os.path.isfile(current_text):
                 self._save_settings()
                 self.ffmpeg_path = current_text
-                self.ffprobe_path = os.path.join(
-                    os.path.dirname(current_text), "ffprobe.exe"
-                )
                 # Look for ffprobe.exe in the same directory
                 ffprobe_path = os.path.join(
                     os.path.dirname(current_text), "ffprobe.exe"
@@ -5985,6 +6017,7 @@ class VideoConverterApp:
 
         # Map keycodes to their handler methods
         handlers = {
+            65: self._select_all,  # A
             67: self._copy_text,  # C
             86: self._paste_text,  # V
             88: self._cut_text,  # X
@@ -5994,6 +6027,30 @@ class VideoConverterApp:
         if handler:
             handler()
             return "break"  # Prevent further event propagation
+
+    def _select_all(self):
+        """Select all text in the currently focused widget."""
+        widget = self.master.focus_get()
+        if widget is None:
+            return
+
+        try:
+            if isinstance(widget, (ctk.CTkTextbox, tk.Text)):
+                widget.tag_add("sel", "1.0", "end")
+            elif isinstance(widget, ctk.CTkEntry):
+                # CTkEntry contains an internal tk.Entry
+                entry = widget._entry if hasattr(widget, "_entry") else widget
+                entry.select_range(0, tk.END)
+            elif isinstance(widget, tk.Entry):
+                widget.select_range(0, tk.END)
+            else:
+                # Fallback for other widgets that might support selection
+                if hasattr(widget, "select_range"):
+                    widget.select_range(0, tk.END)
+                elif hasattr(widget, "selection_range"):
+                    widget.selection_range(0, tk.END)
+        except Exception as e:
+            print(f"Error selecting all: {e}")
 
     def _copy_text(self):
         widget = self.master.focus_get()
@@ -6028,12 +6085,7 @@ class VideoConverterApp:
 
         if text:
             try:
-                win32clipboard.OpenClipboard()
-                try:
-                    win32clipboard.EmptyClipboard()
-                    win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
-                finally:
-                    win32clipboard.CloseClipboard()
+                _set_clipboard_text(text)
             except Exception as e:
                 print(f"Error setting clipboard: {e}")
 
@@ -6137,12 +6189,7 @@ class VideoConverterApp:
         final_command = " ".join(result)
 
         try:
-            win32clipboard.OpenClipboard()
-            win32clipboard.EmptyClipboard()
-            win32clipboard.SetClipboardText(
-                final_command, win32clipboard.CF_UNICODETEXT
-            )
-            win32clipboard.CloseClipboard()
+            _set_clipboard_text(final_command)
             self.ffmpeg_output.set("Command copied to clipboard!")
         except Exception as e:
             print(f"Error setting clipboard: {e}")
@@ -6319,11 +6366,10 @@ class VideoConverterApp:
             textbox.delete("1.0", "end")
 
             # Get file path
-            base_path = (
-                sys._MEIPASS
-                if getattr(sys, "frozen", False)
-                else os.path.dirname(os.path.abspath(__file__))
-            )
+            if getattr(sys, "frozen", False):
+                base_path = os.path.dirname(sys.executable)
+            else:
+                base_path = os.path.dirname(os.path.abspath(__file__))
             file_name = next(tab[2] for tab in tabs if tab[1] == tab_name)
             file_path = os.path.join(base_path, file_name)
 
@@ -6463,6 +6509,10 @@ class VideoConverterApp:
             error_msg = f"Error retrieving help information:\n{str(e)}"
             window.after(0, lambda: text_widget.configure(text=error_msg))
 
+    def _set_stereo_out(self):
+        self._add_additional_option("-ac 2")
+        self.audio_option.set("aac_160k")
+
     # SHUTDOWN & CLEANUP
     def _on_close(self):
         """Application close handler"""
@@ -6475,10 +6525,10 @@ class VideoConverterApp:
         self.master.quit()
 
 
+icon_path = get_icon_path()
 root = ctk.CTk()
 app = VideoConverterApp(root)
 # ctk.deactivate_automatic_dpi_awareness()
-icon_path = get_icon_path()
 if os.path.exists(icon_path):
     root.after(201, lambda: root.iconbitmap(icon_path))
 else:

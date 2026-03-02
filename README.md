@@ -75,7 +75,7 @@ If you want to run the application from its Python source code:
     cd RedFFmpegatron
     ```
 2.  **Install dependencies:**
-    The project uses `customtkinter`, `pillow`, `pywin32` (for `win32gui`, `win32con`, `win32api`).
+    The project uses `customtkinter`, `pillow`.
     ```bash
     pip install customtkinter pillow pywin32
     ```
@@ -105,9 +105,10 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
       --include-data-file=rff-about.txt=./rff-about.txt ^
       --include-data-file=rff-license.txt=./rff-license.txt ^
       --include-data-file=nff-license.txt=./LICENSE.txt ^
+      --include-data-dir=presets=./presets ^
       --product-name="RedFFmpegatron" ^
-      --product-version="1.2.2" ^
-      --file-version="1.2.2" ^
+      --product-version="1.2.3" ^
+      --file-version="1.2.3" ^
       --file-description="RedFFmpegatron" ^
       --company-name="Deepseek Enjoyer" ^
       --copyright="Copyright (C) 2026 hadouken" ^

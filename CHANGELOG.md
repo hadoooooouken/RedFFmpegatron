@@ -1,5 +1,12 @@
 # RedFFmpegatron - Changelog
 
+## [1.2.2] - 2026-03-02
+- Code cleanup and optimization + bug fixes;
+- Using -filter_complex in Add FF Options automatically ignores -vf filters (simple filters / scaling / FPS / etc.);
+- Added Ctrl+A handler (select all text);
+- Presets: switching between built-in presets (Fast/Quality) now automatically clears filters and trimming settings from the Additional Options section;
+- Additional Options: removed the "Drop thresh" button, added "Stereo out" — downmixes the audio track to 2 channels.
+
 ## [1.2.2] - 2026-02-22
 - Additional Options: Save/Load buttons have been removed, as this functionality is now available via custom presets;
 - Additional Options: Added H-Flip and V-Flip filter buttons (mirror video horizontally/vertically);
