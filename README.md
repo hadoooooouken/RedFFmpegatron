@@ -1,3 +1,5 @@
+![Version](https://img.shields.io/gitlab/v/release/hadoukez%2Fredffmpegatron?gitlab_url=https%3A%2F%2Fgitlab.com&color=red&label=Version) ![License](https://img.shields.io/gitlab/license/hadoukez%2Fredffmpegatron?gitlab_url=https%3A%2F%2Fgitlab.com&color=green) ![Platform](https://img.shields.io/badge/Platform-Windows-0078D4?logo=windows&logoColor=white) ![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white) ![AMD](https://img.shields.io/badge/AMD-AMF-ED1C24?logo=amd&logoColor=white)
+
 ![rff-mainwindow_start](screenshots/rff-mainwindow_start.png)
 
 # RedFFmpegatron 🚀
