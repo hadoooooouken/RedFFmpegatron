@@ -1,6 +1,14 @@
 # RedFFmpegatron - Changelog
 
-## [1.2.2] - 2026-03-02
+## [1.2.4] - 2026-03-04
+- The **Input File** field now shows a tooltip with metadata of the opened video file when hovering the mouse cursor over it;
+- Text fields now support a right-click context menu for text operations (Cut / Copy / Paste / Delete / Select All);
+- The **Batch Converter** window now supports drag-and-drop of multiple files directly from Windows Explorer;
+- Closing the **Batch Converter** window no longer stops the conversion process (it can now be opened and closed at any time);
+- Parameters from the **Add FF Options** field are now always applied, regardless of whether the **Additional Options** section is collapsed or expanded;
+- Various UI/UX improvements and fixes.
+
+## [1.2.3] - 2026-03-02
 - Code cleanup and optimization + bug fixes;
 - Using -filter_complex in Add FF Options automatically ignores -vf filters (simple filters / scaling / FPS / etc.);
 - Added Ctrl+A handler (select all text);
