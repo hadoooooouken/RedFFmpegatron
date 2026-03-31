@@ -1,4 +1,4 @@
-RedFFmpegatron 1.2.6
+RedFFmpegatron 1.2.7
 Video converter and trimming tool powered by AMD AMF hardware acceleration.
 
 Features:

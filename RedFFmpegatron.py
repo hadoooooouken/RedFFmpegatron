@@ -196,7 +196,6 @@ class TextCheckbox(ctk.CTkFrame):
 
         self.var = variable if variable is not None else ctk.BooleanVar()
         self.command = command
-        self.text = text
 
         self.unchecked_char = "▼"
         self.checked_char = "▲"
@@ -254,12 +253,6 @@ class TextCheckbox(ctk.CTkFrame):
             self.checkbox_label.configure(text=self.checked_char)
         else:
             self.checkbox_label.configure(text=self.unchecked_char)
-
-    def get(self):
-        return self.var.get()
-
-    def set(self, value):
-        self.var.set(value)
 
 
 class CTkContextMenu(ctk.CTkToplevel):
@@ -909,7 +902,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.2.6")
+        master.title("RedFFmpegatron 1.2.7")
 
         dpi = get_real_dpi()
         scaling = int(round((dpi / 96) * 100))
@@ -1216,7 +1209,15 @@ class VideoConverterApp:
         self.btn_browse.bind(
             "<Button-3>", lambda e: self._explore_path(e, self.input_file.get())
         )
-        CTkToolTip(self.btn_browse, message="Right-click to open containing folder", bg_color=SECONDARY_BG, text_color=TEXT_COLOR_W, alpha=1.0, corner_radius=6, delay=0.3)
+        CTkToolTip(
+            self.btn_browse,
+            message="Right-click to open containing folder",
+            bg_color=SECONDARY_BG,
+            text_color=TEXT_COLOR_W,
+            alpha=1.0,
+            corner_radius=6,
+            delay=0.3,
+        )
 
         # Output File
         ctk.CTkLabel(main_frame, text="Output File:").grid(
@@ -1243,7 +1244,15 @@ class VideoConverterApp:
         self.btn_save_as.bind(
             "<Button-3>", lambda e: self._explore_path(e, self.output_file.get())
         )
-        CTkToolTip(self.btn_save_as, message="Right-click to open containing folder", bg_color=SECONDARY_BG, text_color=TEXT_COLOR_W, alpha=1.0, corner_radius=6, delay=0.3)
+        CTkToolTip(
+            self.btn_save_as,
+            message="Right-click to open containing folder",
+            bg_color=SECONDARY_BG,
+            text_color=TEXT_COLOR_W,
+            alpha=1.0,
+            corner_radius=6,
+            delay=0.3,
+        )
 
         # FFmpeg Path
         ctk.CTkLabel(main_frame, text="FFmpeg Path:").grid(
@@ -1275,7 +1284,15 @@ class VideoConverterApp:
         self.btn_ffmpeg.bind(
             "<Button-3>", lambda e: self._explore_path(e, self.ffmpeg_custom_path.get())
         )
-        CTkToolTip(self.btn_ffmpeg, message="Right-click to open containing folder", bg_color=SECONDARY_BG, text_color=TEXT_COLOR_W, alpha=1.0, corner_radius=6, delay=0.3)
+        CTkToolTip(
+            self.btn_ffmpeg,
+            message="Right-click to open containing folder",
+            bg_color=SECONDARY_BG,
+            text_color=TEXT_COLOR_W,
+            alpha=1.0,
+            corner_radius=6,
+            delay=0.3,
+        )
         # Video Bitrate/Quality Level
         self.bitrate_label = ctk.CTkLabel(main_frame, text="Video Bitrate (k):")
         self.bitrate_label.grid(row=3, column=0, sticky="w", padx=10, pady=5)
@@ -1315,7 +1332,15 @@ class VideoConverterApp:
         )
         self.btn_output.grid(row=3, column=2, sticky="w", padx=5, pady=5)
         self.btn_output.bind("<Button-3>", lambda e: self._copy_command_to_clipboard())
-        CTkToolTip(self.btn_output, message="Right-click to copy command to clipboard", bg_color=SECONDARY_BG, text_color=TEXT_COLOR_W, alpha=1.0, corner_radius=6, delay=0.3)
+        CTkToolTip(
+            self.btn_output,
+            message="Right-click to copy command to clipboard",
+            bg_color=SECONDARY_BG,
+            text_color=TEXT_COLOR_W,
+            alpha=1.0,
+            corner_radius=6,
+            delay=0.3,
+        )
 
         ctk.CTkButton(
             main_frame,
@@ -2591,7 +2616,15 @@ class VideoConverterApp:
         self.play_output_button.pack(side="left", expand=True, fill="x", padx=(2, 2))
         self.play_output_button.configure(command=self._play_output_file)
         self.play_output_button.bind("<Button-3>", self._on_vmaf_right_click)
-        CTkToolTip(self.play_output_button, message="Right-click to run VMAF analysis", bg_color=SECONDARY_BG, text_color=TEXT_COLOR_W, alpha=1.0, corner_radius=6, delay=0.3)
+        CTkToolTip(
+            self.play_output_button,
+            message="Right-click to run VMAF analysis",
+            bg_color=SECONDARY_BG,
+            text_color=TEXT_COLOR_W,
+            alpha=1.0,
+            corner_radius=6,
+            delay=0.3,
+        )
 
         self.play10s_button = ctk.CTkButton(
             self.play_buttons_frame,
@@ -3302,7 +3335,7 @@ class VideoConverterApp:
             "custom_preset_selected": self.custom_preset_name.get()
             if self.selected_preset.get() == "custom"
             else "",
-            "version": "1.2.6",
+            "version": "1.2.7",
         }
         return settings
 
@@ -7203,12 +7236,34 @@ class VideoConverterApp:
     # SHUTDOWN & CLEANUP
     def _on_close(self):
         """Application close handler"""
-        self._cleanup_preview_files()
-        self.batch_files = []
-        # Stop recording if active
-        if self.is_recording:
+
+        # Terminate all active FFmpeg processes to prevent zombie processes
+        if getattr(self, "is_recording", False):
             self._stop_recording()
+
+        if getattr(self, "is_converting", False):
+            self._cancel_conversion()
+
+        if getattr(self, "is_creating_preview", False):
+            self._cancel_preview()
+
+        if getattr(self, "_vmaf_running", False):
+            self._cancel_vmaf()
+
+        # Clean up temporary preview files
+        self._cleanup_preview_files()
+
+        # Clear batch files list
+        self.batch_files = []
+
+        # Save current settings
         self._save_settings()
+
+        # Properly release Windows API resources for Drag-and-Drop
+        if hasattr(self, "drop_target") and getattr(self, "drop_target", None):
+            self.drop_target.cleanup()
+
+        # Close the application
         self.master.quit()
 
 
