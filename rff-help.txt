@@ -530,6 +530,16 @@ The Screen Record feature allows you to capture Windows Desktop
 - Real-time monitoring shows recording status in the output window
 - Recording continues in background while window is minimized
 
+#System Tray Integration
+- During recording, an icon appears in the system tray
+- Right-click the tray icon to access a context menu with "Stop Recording" option
+- Allows stopping recording without restoring the main window
+- Tray icon disappears automatically when recording stops
+
+#Global Hotkey
+- Press Alt+F9 to instantly stop screen recording from anywhere
+- Works even when the application window is minimized or in the background
+
 #Output Files
 - Default location: Desktop folder
 - Automatic filename: screen_record-DD_MM_YY-HH_MM.[extension]

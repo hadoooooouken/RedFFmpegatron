@@ -1,5 +1,9 @@
 # RedFFmpegatron - Changelog
 
+## [1.2.8] - 2026-04-19
+- The ability to stop screen recording from the system tray icon menu or using the Alt+F9 hotkey;
+- Better memory management and cleaning of processes (ffmpeg.exe) after closing the program.
+
 ## [1.2.7] - 2026-03-31
 - Code cleanup.
 
