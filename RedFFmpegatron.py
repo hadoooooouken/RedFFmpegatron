@@ -530,7 +530,7 @@ class TrayIcon:
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_USER_TRAY
         nid.hIcon = self._hicon
-        nid.szTip = "RedFFmpegatron 1.2.8"
+        nid.szTip = "RedFFmpegatron 1.2.9"
         return nid
 
     def show(self):
@@ -1061,7 +1061,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.2.8")
+        master.title("RedFFmpegatron 1.2.9")
 
         dpi = get_real_dpi()
         scaling = int(round((dpi / 96) * 100))
@@ -3494,7 +3494,7 @@ class VideoConverterApp:
             "custom_preset_selected": self.custom_preset_name.get()
             if self.selected_preset.get() == "custom"
             else "",
-            "version": "1.2.8",
+            "version": "1.2.9",
         }
         return settings
 
@@ -4145,6 +4145,8 @@ class VideoConverterApp:
                 command,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=10,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
@@ -4153,9 +4155,30 @@ class VideoConverterApp:
                 return
 
             # ffprobe output is usually in stderr
-            output = result.stderr.strip()
+            output = (result.stderr or "").strip()
             if not output:
-                output = result.stdout.strip()
+                output = (result.stdout or "").strip()
+
+            # Filter out verbose metadata tags to keep tooltip compact
+            if output:
+                lines = output.splitlines()
+                filtered = []
+                metadata_indent = -1
+                for line in lines:
+                    stripped = line.strip()
+                    indent = len(line) - len(line.lstrip()) if stripped else 0
+                    # Detect "Metadata:" header and remember its indent level
+                    if stripped == "Metadata:":
+                        metadata_indent = indent
+                        continue
+                    # Inside a metadata block: skip lines indented deeper
+                    if metadata_indent >= 0:
+                        if stripped and indent > metadata_indent:
+                            continue
+                        # Line at same or lesser indent → metadata block ended
+                        metadata_indent = -1
+                    filtered.append(line)
+                output = "\n".join(filtered).strip()
 
             # Limit cache to 50 entries
             if len(self.ffprobe_cache) >= 50:
@@ -4179,6 +4202,44 @@ class VideoConverterApp:
     def _set_tooltip_message(self, message):
         if getattr(self, "input_file_tooltip", None) is not None:
             self.input_file_tooltip.configure(message=message)
+
+            # Override on_enter to clamp tooltip within screen bounds vertically
+            tooltip = self.input_file_tooltip
+            original_on_enter = tooltip.on_enter.__func__ if hasattr(tooltip.on_enter, '__func__') else None
+
+            def _clamped_on_enter(event, _self=tooltip):
+                if _self.disable:
+                    return
+                _self.last_moved = __import__('time').time()
+                if _self.status == "outside":
+                    _self.status = "inside"
+                if not _self.follow:
+                    if _self.status == "visible":
+                        return
+                    else:
+                        _self.status = "inside"
+
+                screen_w = _self.winfo_screenwidth()
+                screen_h = _self.winfo_screenheight()
+                text_w = _self.message_label.winfo_reqwidth()
+                text_h = _self.message_label.winfo_reqheight()
+
+                # Horizontal clamping
+                x = event.x_root + _self.x_offset
+                if screen_w - event.x_root < text_w + 20:
+                    x = event.x_root - text_w - 20
+
+                # Vertical clamping — keep tooltip within screen
+                y = event.y_root + _self.y_offset
+                if y + text_h + 20 > screen_h:
+                    y = event.y_root - text_h - 10
+                if y < 0:
+                    y = 0
+
+                _self.geometry(f"+{x}+{y}")
+                _self.after(int(_self.delay * 1000), _self._show)
+
+            tooltip.on_enter = _clamped_on_enter
 
     def _explore_path(self, event, path_str):
         if (
@@ -4321,6 +4382,8 @@ class VideoConverterApp:
                 check=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             return result.stdout.strip().split("\n")[0]
@@ -4400,6 +4463,8 @@ class VideoConverterApp:
                     check=True,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
                 duration = float(result.stdout.strip())
@@ -4436,6 +4501,8 @@ class VideoConverterApp:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=True,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 timeout=10,
@@ -4972,6 +5039,8 @@ class VideoConverterApp:
                 bufsize=1,
                 startupinfo=startupinfo,
                 creationflags=creationflags,
+                encoding="utf-8",
+                errors="replace",
             )
             duration_str = process.stdout.read().strip()
             process.wait()
