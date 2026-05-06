@@ -11,7 +11,7 @@ from collections import OrderedDict
 from datetime import datetime
 from io import BytesIO
 from json import dump, load
-from re import sub, search
+from re import sub, search, compile, IGNORECASE
 from shlex import split
 from threading import Event, Thread, Timer
 from tkinter import filedialog, messagebox, simpledialog
@@ -530,7 +530,7 @@ class TrayIcon:
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_USER_TRAY
         nid.hIcon = self._hicon
-        nid.szTip = "RedFFmpegatron 1.2.9"
+        nid.szTip = "RedFFmpegatron 1.3.0"
         return nid
 
     def show(self):
@@ -597,6 +597,12 @@ class BatchConverterWindow:
         self.files = main_app.batch_files.copy()
         self._saved_input_file = ""
         self._saved_output_file = ""
+        self.current_file_index = 0
+        
+        # Use persistent variables from main app
+        self.batch_output_folder = main_app.batch_output_folder
+        self.change_container_var = main_app.batch_change_container
+        self.output_container_var = main_app.batch_output_container
 
         # Create window
         self.window = ctk.CTkToplevel(master)
@@ -629,6 +635,8 @@ class BatchConverterWindow:
         self._create_widgets()
         self._setup_drag_drop()
         self._update_files_display()
+        self._update_path_label()
+        self._toggle_container_menu()
 
         # Update main window convert button
         self._update_main_convert_button()
@@ -642,13 +650,75 @@ class BatchConverterWindow:
 
         # Files list frame
         list_frame = ctk.CTkFrame(main_frame, fg_color=SECONDARY_BG)
-        list_frame.pack(fill="both", expand=True, pady=(0, 10))
+        list_frame.pack(fill="both", expand=True, pady=(0, 5))
 
         # Scrollable frame for files
         self.scrollable_frame = ctk.CTkScrollableFrame(
             list_frame, fg_color=SECONDARY_BG
         )
         self.scrollable_frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # Output path label frame
+        self.output_path_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        self.output_path_frame.pack(fill="x", pady=(0, 5))
+
+        self.output_prefix_label = ctk.CTkLabel(
+            self.output_path_frame,
+            text="Output: ",
+            font=("Segoe UI", 13),
+            text_color=ACCENT_RED,
+        )
+        self.output_prefix_label.pack(side="left")
+
+        self.output_path_display = ctk.CTkLabel(
+            self.output_path_frame,
+            text="Original folder(s)",
+            font=("Segoe UI", 13),
+            text_color=TEXT_COLOR_W,
+        )
+        self.output_path_display.pack(side="left")
+
+        # Container options frame
+        container_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        container_frame.pack(fill="x", pady=(0, 10))
+
+        container_frame.columnconfigure(0, weight=1, uniform="group1")
+        container_frame.columnconfigure(1, weight=1, uniform="group1")
+        container_frame.columnconfigure(2, weight=1, uniform="group1")
+
+        self.output_folder_btn = ctk.CTkButton(
+            container_frame,
+            text="Output Folder",
+            command=self._select_output_folder,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+        )
+        self.output_folder_btn.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+
+        self.change_container_checkbox = ctk.CTkCheckBox(
+            container_frame,
+            text="Change output container",
+            variable=self.change_container_var,
+            command=self._toggle_container_menu,
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
+        )
+        self.change_container_checkbox.grid(row=0, column=1, sticky="w", padx=(0, 5))
+
+        self.container_menu = ctk.CTkOptionMenu(
+            container_frame,
+            values=["mp4", "mkv", "mov"],
+            variable=self.output_container_var,
+            state="disabled",
+            fg_color=ACCENT_GREY,
+            button_color=ACCENT_GREY,
+            button_hover_color=HOVER_RED,
+            dropdown_fg_color=SECONDARY_BG,
+            dropdown_hover_color=ACCENT_RED,
+            text_color=TEXT_COLOR_W,
+        )
+        self.container_menu.grid(row=0, column=2, sticky="ew", padx=(0, 0))
 
         # Buttons frame
         buttons_frame = ctk.CTkFrame(main_frame, fg_color=PRIMARY_BG)
@@ -684,6 +754,52 @@ class BatchConverterWindow:
             text_color=TEXT_COLOR_B,
         )
         self.remove_all_btn.pack(side="left", expand=True, fill="x")
+
+    def _toggle_container_menu(self):
+        if self.change_container_var.get():
+            self.container_menu.configure(
+                state="normal", fg_color=SECONDARY_BG, button_color=ACCENT_RED
+            )
+        else:
+            self.container_menu.configure(
+                state="disabled", fg_color=ACCENT_GREY, button_color=ACCENT_GREY
+            )
+
+    def _select_output_folder(self):
+        initial_dir = self.batch_output_folder.get() or self.main_app.last_output_dir.get() or os.getcwd()
+        folder = filedialog.askdirectory(
+            parent=self.window,
+            initialdir=initial_dir, 
+            title="Select Output Folder"
+        )
+        
+        self.window.lift()
+        self.window.focus_force()
+        
+        if folder:
+            normalized_folder = os.path.normpath(folder)
+            self.batch_output_folder.set(normalized_folder)
+            self._update_path_label()
+
+    def _update_path_label(self):
+        if not hasattr(self, "output_path_display"):
+            return
+            
+        batch_folder = self.batch_output_folder.get()
+        main_folder = self.main_app.last_output_dir.get()
+        
+        if batch_folder:
+            path_text = batch_folder
+        elif main_folder and os.path.exists(main_folder):
+            path_text = main_folder
+        else:
+            path_text = "Original folder(s)"
+            
+        # Truncate path if too long
+        if len(path_text) > 85:
+            path_text = path_text[:82] + "..."
+            
+        self.output_path_display.configure(text=path_text)
 
     def _setup_drag_drop(self):
         # Enable drag and drop for the window
@@ -723,6 +839,7 @@ class BatchConverterWindow:
         )
 
         filenames = filedialog.askopenfilenames(
+            parent=self.window,
             title="Select Video Files",
             initialdir=initial_dir,
             filetypes=(
@@ -898,22 +1015,21 @@ class BatchConverterWindow:
             else "_av1"
         )
 
-        # Get output directory from main app or use input file directory
-        if self.main_app.last_output_dir.get() and os.path.exists(
+        # Get output directory
+        if self.batch_output_folder.get():
+            output_dir = self.batch_output_folder.get()
+        elif self.main_app.last_output_dir.get() and os.path.exists(
             self.main_app.last_output_dir.get()
         ):
             output_dir = self.main_app.last_output_dir.get()
         else:
             output_dir = os.path.dirname(input_path)
 
-        # Use the same extension logic as main app
-        current_output = self.main_app.output_file.get()
-        if current_output:
-            original_extension = os.path.splitext(current_output)[1]
-            if not original_extension:
-                original_extension = ".mp4"
+        # Determine extension: either use override from dropdown or preserve original input extension
+        if self.change_container_var.get():
+            original_extension = "." + self.output_container_var.get()
         else:
-            original_extension = ".mp4"
+            original_extension = os.path.splitext(input_path)[1] or ".mp4"
 
         output_path = os.path.normpath(
             os.path.join(
@@ -1058,10 +1174,12 @@ class VideoConverterApp:
     def __init__(self, master):
         self.preview_job = None  # used for debouncing preview creation
         self.batch_converter_window = None
+        self.map_window = None
+        self.map_selection_cache = {}
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.2.9")
+        master.title("RedFFmpegatron 1.3.0")
 
         dpi = get_real_dpi()
         scaling = int(round((dpi / 96) * 100))
@@ -1235,12 +1353,24 @@ class VideoConverterApp:
             "write", lambda *args: self._on_setting_changed()
         )
 
+        # Batch Converter Settings
+        self.batch_output_folder.trace_add(
+            "write", lambda *args: self._on_setting_changed()
+        )
+        self.batch_change_container.trace_add(
+            "write", lambda *args: self._on_setting_changed()
+        )
+        self.batch_output_container.trace_add(
+            "write", lambda *args: self._on_setting_changed()
+        )
+
     def _setup_variables(self):
         # Initialize all Tkinter control variables
         self.ffprobe_cache = OrderedDict()
         self.input_file_tooltip = None
         self._tooltip_generation = 0
         self._tooltip_cancel = Event()
+        self.input_path_placeholder = "Drag and drop a video file here or use the 'Browse' button."
         self.input_file = ctk.StringVar()
         self.output_file = ctk.StringVar()
         self.bitrate = ctk.StringVar(value="6000")
@@ -1327,6 +1457,11 @@ class VideoConverterApp:
         self.custom_preset_name = ctk.StringVar(value="")
         self.custom_preset_selected = ctk.StringVar(value="")
         self.loading_preset = False
+        
+        # Batch converter persistent variables
+        self.batch_output_folder = ctk.StringVar(value="")
+        self.batch_change_container = ctk.BooleanVar(value=False)
+        self.batch_output_container = ctk.StringVar(value="mp4")
 
     def _create_widgets(self):
         # Build the entire GUI interface
@@ -1348,7 +1483,7 @@ class VideoConverterApp:
         )
         self.input_file_entry.grid(row=0, column=1, padx=5, pady=5)
         self.input_file_entry.insert(
-            0, "Drag and drop a video file here or use the 'Browse' button."
+            0, self.input_path_placeholder
         )
         self.input_file_entry.configure(text_color=PLACEHOLDER_COLOR)
         self.input_file_entry.bind("<FocusIn>", self._on_input_file_focus_in)
@@ -2531,10 +2666,10 @@ class VideoConverterApp:
 
         ctk.CTkButton(
             quick_buttons_frame_2,
-            text="Force 8 bit",
-            command=lambda: self._add_additional_option("-pix_fmt:v nv12"),
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
+            text="Streams",
+            command=self._open_map_window,
+            fg_color=ACCENT_RED,
+            hover_color=HOVER_RED,
             text_color=TEXT_COLOR_B,
             width=106,
         ).pack(side="left")
@@ -2606,15 +2741,15 @@ class VideoConverterApp:
             width=106,
         ).pack(side="left", padx=(0, 10))
 
-        ctk.CTkButton(
-            quick_buttons_frame_3,
-            text="Force 10 bit",
-            command=lambda: self._add_additional_option("-pix_fmt:v p010le"),
-            fg_color=ACCENT_GREY,
-            hover_color=HOVER_GREY,
-            text_color=TEXT_COLOR_B,
-            width=106,
-        ).pack(side="left")
+        # ctk.CTkButton(
+        #     quick_buttons_frame_3,
+        #     text="Free button",
+        #     command=None,
+        #     fg_color=ACCENT_GREY,
+        #     hover_color=HOVER_GREY,
+        #     text_color=TEXT_COLOR_B,
+        #     width=106,
+        # ).pack(side="left")
 
         # Presets Section
         presets_frame_toggle = TextCheckbox(
@@ -3398,6 +3533,19 @@ class VideoConverterApp:
             self._update_preset_dropdown()
             self.custom_preset_name.set(custom_preset_selected)
 
+        # Batch Converter Settings
+        batch_output_folder = settings_dict.get("batch_output_folder", "")
+        if batch_output_folder and os.path.exists(batch_output_folder):
+            self.batch_output_folder.set(batch_output_folder)
+
+        batch_change_container = settings_dict.get("batch_change_container")
+        if batch_change_container is not None:
+            self.batch_change_container.set(batch_change_container)
+
+        batch_output_container = settings_dict.get("batch_output_container", "")
+        if batch_output_container:
+            self.batch_output_container.set(batch_output_container)
+
         # Check if preset's preset file still exists
         if selected_preset == "custom" and custom_preset_selected:
             preset_file = os.path.join(
@@ -3494,7 +3642,11 @@ class VideoConverterApp:
             "custom_preset_selected": self.custom_preset_name.get()
             if self.selected_preset.get() == "custom"
             else "",
-            "version": "1.2.9",
+            # Batch Converter Settings
+            "batch_output_folder": self.batch_output_folder.get(),
+            "batch_change_container": self.batch_change_container.get(),
+            "batch_output_container": self.batch_output_container.get(),
+            "version": "1.3.0",
         }
         return settings
 
@@ -3919,7 +4071,7 @@ class VideoConverterApp:
         temp_encoded = os.path.join(temp_dir, f"{base_name}_encoded10s.mp4")
         self.preview_temp_files.append(temp_encoded)
 
-        # Command to create streamcopy
+        # Command to create streamcopy (preserving all streams)
         streamcopy_cmd = [
             self.ffmpeg_path,
             "-ss",
@@ -3928,6 +4080,9 @@ class VideoConverterApp:
             input_path,
             "-t",
             "10",
+            "-map",
+            "0",
+            "-ignore_unknown",
             "-c",
             "copy",
             "-y",
@@ -4585,6 +4740,10 @@ class VideoConverterApp:
                 if add_val and add_val != self.additional_options_placeholder:
                     other_additional_options.extend(add_val.split())
 
+            # Add -map 0 and -ignore_unknown if not manually specified
+            if "-map" not in " ".join(other_additional_options):
+                command.extend(["-map", "0", "-ignore_unknown"])
+
             # Add trim options at the beginning if we have any
             if trim_options:
                 command.extend(trim_options)
@@ -4631,6 +4790,10 @@ class VideoConverterApp:
                 add_val = self.additional_options.get().strip()
                 if add_val and add_val != self.additional_options_placeholder:
                     other_additional_options.extend(add_val.split())
+
+        # Add -map 0 and -ignore_unknown if not manually specified
+        if "-map" not in " ".join(other_additional_options):
+            command.extend(["-map", "0", "-ignore_unknown"])
 
         # Add trim options at the beginning if we have any
         if trim_options:
@@ -7523,6 +7686,293 @@ class VideoConverterApp:
     def _kill_our_ffmpeg_processes_async(self):
         """Asynchronous version: runs killer in a background thread."""
         Thread(target=self._kill_our_ffmpeg_processes, daemon=True).start()
+
+    def _open_map_window(self):
+        """Open the stream selection window"""
+        input_file = self.input_file.get()
+        if not input_file or input_file == self.input_path_placeholder:
+            messagebox.showwarning("Warning", "Please select an input file first.")
+            return
+
+        if not os.path.exists(input_file):
+            messagebox.showwarning("Error", "Input file does not exist.")
+            return
+
+        if self.map_window is not None:
+            self.map_window.lift()
+            self.map_window.focus_force()
+            return
+
+        self.map_window = self._create_stream_map_window(input_file)
+
+    def _create_stream_map_window(self, input_file):
+        """Create and show the stream selection window"""
+        map_window = ctk.CTkToplevel(self.master)
+        map_window.title(f"Stream Selection - {os.path.basename(input_file)}")
+        map_window.geometry("600x700")
+        map_window.minsize(600, 550)
+        
+        # Center relative to parent
+        self.master.update_idletasks()
+        x = self.master.winfo_x() + (self.master.winfo_width() - 600) // 2
+        y = self.master.winfo_y() + (self.master.winfo_height() - 700) // 2
+        map_window.geometry(f"+{x}+{y}")
+        map_window.configure(fg_color=PRIMARY_BG)
+
+        # Ensure window is on top without blocking
+        map_window.after(100, map_window.lift)
+        map_window.after(110, map_window.focus_force)
+
+        # Set window icon
+        icon_path = get_icon_path()
+        if os.path.exists(icon_path):
+            map_window.after(200, lambda: map_window.iconbitmap(icon_path))
+
+        # Main frame
+        main_frame = ctk.CTkFrame(map_window, fg_color=PRIMARY_BG)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        header_label = ctk.CTkLabel(
+            main_frame,
+            text="Select streams to include in the output file:",
+            font=("Segoe UI", 16),
+            text_color=TEXT_COLOR_W,
+        )
+        header_label.pack(pady=(0, 10))
+
+        # Scrollable area for checkboxes
+        scroll_frame = ctk.CTkScrollableFrame(
+            main_frame,
+            fg_color=SECONDARY_BG,
+            scrollbar_button_color=ACCENT_GREY,
+            scrollbar_button_hover_color=HOVER_GREY,
+        )
+        scroll_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Dictionary to store checkboxes: {idx: {"var": var, "map_code": map_code}}
+        stream_vars = {}
+
+        def add_stream_section(title, streams):
+            if not streams:
+                return
+            
+            section_label = ctk.CTkLabel(
+                scroll_frame,
+                text=title,
+                font=("Segoe UI", 13),
+                text_color=TEXT_COLOR_W,
+            )
+            section_label.pack(anchor="w", pady=(10, 5), padx=10)
+            
+            for s in streams:
+                idx = s["index"]
+                label_text = s["text"]
+                map_code = s["map_code"]
+
+                # Restore previous selection if available for this file
+                saved_selection = self.map_selection_cache.get(input_file, {})
+                default_val = saved_selection.get(idx, True)
+
+                var = ctk.BooleanVar(value=default_val)
+                stream_vars[idx] = {"var": var, "map_code": map_code}
+                
+                cb = ctk.CTkCheckBox(
+                    scroll_frame,
+                    text=label_text,
+                    variable=var,
+                    font=("Segoe UI", 13),
+                    fg_color=ACCENT_RED,
+                    hover_color=HOVER_RED,
+                    text_color=TEXT_COLOR_W,
+                )
+                cb.pack(anchor="w", padx=25, pady=2)
+
+        loading_label = ctk.CTkLabel(
+            scroll_frame,
+            text="Analyzing file, please wait...",
+            font=("Segoe UI", 13),
+            text_color=ACCENT_GREY
+        )
+        loading_label.pack(pady=40)
+
+        def fetch_and_populate():
+            try:
+                cmd = [self.ffprobe_path, "-hide_banner", input_file]
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                
+                # ffprobe output is in stderr for standard info
+                output = result.stderr or result.stdout
+                
+                v_streams = []
+                a_streams = []
+                s_streams = []
+                
+                v_count = 0
+                a_count = 0
+                s_count = 0
+                
+                # Robust regex to handle technical IDs like [0x1], languages (und), etc.
+                stream_pattern = compile(r'Stream #0:(\d+)(.*?)\s*:\s*(Video|Audio|Subtitle)\s*:\s*(.*)', IGNORECASE)
+                
+                for line in output.splitlines():
+                    match = stream_pattern.search(line)
+                    if match:
+                        idx = int(match.group(1))
+                        extra = match.group(2).strip()
+                        s_type = match.group(3).capitalize()
+                        desc = match.group(4).strip()
+                        
+                        full_text = f"Stream #{idx}{extra}: {desc}"
+                        
+                        if s_type == "Video":
+                            map_code = f"0:v:{v_count}"
+                            v_count += 1
+                            v_streams.append({"index": idx, "text": full_text, "map_code": map_code})
+                        elif s_type == "Audio":
+                            map_code = f"0:a:{a_count}"
+                            a_count += 1
+                            a_streams.append({"index": idx, "text": full_text, "map_code": map_code})
+                        elif s_type == "Subtitle":
+                            map_code = f"0:s:{s_count}"
+                            s_count += 1
+                            s_streams.append({"index": idx, "text": full_text, "map_code": map_code})
+
+                def update_ui():
+                    if loading_label.winfo_exists():
+                        loading_label.destroy()
+                    
+                    if not (v_streams or a_streams or s_streams):
+                        error_label = ctk.CTkLabel(scroll_frame, text="No streams found or error parsing output", text_color=ACCENT_RED)
+                        error_label.pack(pady=20)
+                    else:
+                        add_stream_section("Video", v_streams)
+                        add_stream_section("Audio", a_streams)
+                        add_stream_section("Subtitle", s_streams)
+
+                    # Enable buttons now that streams are loaded
+                    apply_btn.configure(state="normal")
+                    check_btn.configure(state="normal")
+                    uncheck_btn.configure(state="normal")
+
+                map_window.after(0, update_ui)
+                
+            except Exception as e:
+                def show_error():
+                    if loading_label.winfo_exists():
+                        loading_label.destroy()
+                    error_label = ctk.CTkLabel(scroll_frame, text=f"Error: {str(e)}", text_color=ACCENT_RED)
+                    error_label.pack(pady=20)
+                map_window.after(0, show_error)
+
+
+        # Buttons frame
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(0, 5))
+
+        def save_selection():
+            self.map_selection_cache[input_file] = {idx: data["var"].get() for idx, data in stream_vars.items()}
+
+        def apply_map():
+            selected_vars = [data["var"].get() for data in stream_vars.values()]
+            all_selected = all(selected_vars)
+            
+            if not any(selected_vars):
+                messagebox.showwarning("Warning", "At least one stream must be selected.")
+                return
+
+            save_selection()
+            
+            current_options = self.additional_options.get()
+            if current_options == self.additional_options_placeholder:
+                current_options = ""
+            
+            # Remove old -map and -ignore_unknown
+            cleaned_options = sub(r'-map\s+\S+', '', current_options)
+            cleaned_options = sub(r'-ignore_unknown\s*', '', cleaned_options).strip()
+            
+            if all_selected:
+                # If everything is selected, we don't need explicit -map 0:x
+                # FFmpeg's default or our default _build_ffmpeg_command logic will handle it
+                new_options = cleaned_options
+            else:
+                selected_codes = [data["map_code"] for data in stream_vars.values() if data["var"].get()]
+                map_str = "-ignore_unknown " + " ".join([f"-map {code}" for code in selected_codes])
+                new_options = f"{cleaned_options} {map_str}".strip()
+
+            if not new_options:
+                self.additional_options.set(self.additional_options_placeholder)
+                self.additional_options_entry.configure(text_color=PLACEHOLDER_COLOR)
+            else:
+                self.additional_options.set(new_options)
+                self.additional_options_entry.configure(text_color=TEXT_COLOR_W)
+                
+            self.map_window = None
+            map_window.destroy()
+
+        def on_close():
+            if stream_vars:
+                save_selection()
+            self.map_window = None
+            map_window.destroy()
+
+        def check_all():
+            for data in stream_vars.values():
+                data["var"].set(True)
+
+        def uncheck_all():
+            for data in stream_vars.values():
+                data["var"].set(False)
+
+        apply_btn = ctk.CTkButton(
+            btn_frame,
+            text="Apply",
+            command=apply_map,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            state="disabled"
+        )
+        apply_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
+
+        check_btn = ctk.CTkButton(
+            btn_frame,
+            text="Check All",
+            command=check_all,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            state="disabled"
+        )
+        check_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
+
+        uncheck_btn = ctk.CTkButton(
+            btn_frame,
+            text="Uncheck All",
+            command=uncheck_all,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+            state="disabled"
+        )
+        uncheck_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
+
+        close_btn = ctk.CTkButton(
+            btn_frame,
+            text="Close",
+            command=on_close,
+            fg_color=ACCENT_GREY,
+            hover_color=HOVER_GREY,
+            text_color=TEXT_COLOR_B,
+        )
+        close_btn.pack(side="left", expand=True, fill="x")
+
+        # Start analysis in background thread now that everything is initialized
+        Thread(target=fetch_and_populate, daemon=True).start()
+
+        map_window.protocol("WM_DELETE_WINDOW", on_close)
+        map_window.lift()
+        map_window.focus_force()
+        return map_window
 
     def _on_close(self):
         """Application close handler"""
