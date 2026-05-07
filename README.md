@@ -109,8 +109,8 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
       --include-data-file=nff-license.txt=./LICENSE.txt ^
       --include-data-dir=presets=./presets ^
       --product-name="RedFFmpegatron" ^
-      --product-version="1.3.0" ^
-      --file-version="1.3.0" ^
+      --product-version="1.3.1" ^
+      --file-version="1.3.1" ^
       --file-description="RedFFmpegatron" ^
       --company-name="Deepseek Enjoyer" ^
       --copyright="Copyright (C) 2026 hadouken" ^
