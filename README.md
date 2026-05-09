@@ -35,7 +35,7 @@ It provides a simple dark-themed interface with drag-and-drop support, presets, 
   - Video filters (crop, eq, unsharp, saturation, HDR→SDR, etc.)
   - Audio filters (atempo, loudnorm, etc.)
 - **Batch Conversion:** Process multiple video files in one go with the same settings - perfect for converting entire folders of videos.
-- **Screen Recording:** Record your screen directly with AMF encoding - choose frame rate, codec, and quality settings.
+- **Screen Recording:** Record your screen directly with AMF encoding and capture Windows system audio - choose frame rate, codec, audio codec, and quality settings.
 - **Presets system** for quick configuration
 - **10-second preview** encoding with current settings
 - **Estimated output size** (bitrate mode only)
@@ -77,9 +77,9 @@ If you want to run the application from its Python source code:
     cd RedFFmpegatron
     ```
 2.  **Install dependencies:**
-    The project uses `customtkinter`, `pillow`, `CTkToolTip`.
+    The project uses `customtkinter`, `pillow`, `CTkToolTip`, `pyaudiowpatch`.
     ```bash
-    pip install customtkinter pillow CTkToolTip
+    pip install customtkinter pillow CTkToolTip pyaudiowpatch
     ```
 3.  **Run the application:**
     ```
@@ -109,8 +109,8 @@ You can compile the Python script into a standalone Windows executable (`.exe`) 
       --include-data-file=nff-license.txt=./LICENSE.txt ^
       --include-data-dir=presets=./presets ^
       --product-name="RedFFmpegatron" ^
-      --product-version="1.3.1" ^
-      --file-version="1.3.1" ^
+      --product-version="1.3.2" ^
+      --file-version="1.3.2" ^
       --file-description="RedFFmpegatron" ^
       --company-name="Deepseek Enjoyer" ^
       --copyright="Copyright (C) 2026 hadouken" ^

@@ -1,4 +1,15 @@
 # RedFFmpegatron - Changelog
+ 
+## [1.3.2] - 2026-05-10
+- **Screen Recording**: 
+    - Screen recording now captures audio (unless "Disable audio" is selected);
+    - Added global hotkeys: **Alt+F8** to Start, **Alt+F9** to Stop;
+    - Implemented persistent tray icon for easier recording control when minimized;
+    - Added Windows balloon notifications and sound alerts for recording status;
+    - Added "Open RedFFmpegatron" and "Exit" options to tray context menu;
+    - Added double-click on tray icon to restore application window;
+    - Changed behavior: application no longer automatically restores the window when recording stops.
+
 
 ## [1.3.1] - 2026-05-08
 - **Streams Selection**: Attached pictures (cover art) are now separated from video streams;

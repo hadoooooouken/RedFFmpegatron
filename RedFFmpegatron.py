@@ -4,6 +4,7 @@
 import ctypes.wintypes
 import os
 import subprocess
+from shutil import move
 import sys
 import tempfile
 import tkinter as tk
@@ -13,6 +14,8 @@ from io import BytesIO
 from json import dump, load
 from re import sub, search, compile, IGNORECASE
 from shlex import split
+import time
+import wave
 from threading import Event, Thread, Timer
 from tkinter import filedialog, messagebox, simpledialog
 from winsound import MB_ICONASTERISK, MessageBeep
@@ -21,6 +24,7 @@ from winsound import MB_ICONASTERISK, MessageBeep
 import customtkinter as ctk
 from CTkToolTip import CTkToolTip
 from PIL import Image
+import pyaudiowpatch as pyaudio
 
 # Win32 constants
 GWL_WNDPROC = -4
@@ -39,7 +43,10 @@ MF_STRING = 0x00
 MF_SEPARATOR = 0x800
 TPM_RIGHTBUTTON = 0x02
 TPM_RETURNCMD = 0x0100
-IDM_STOP_RECORDING = 1001
+IDM_START_RECORDING = 1001
+IDM_STOP_RECORDING = 1002
+IDM_OPEN_APP = 1003
+IDM_EXIT = 1004
 
 # Process snapshot constants for killing only our ffmpeg.exe
 TH32CS_SNAPPROCESS = 0x00000002
@@ -66,8 +73,19 @@ class PROCESSENTRY32W(ctypes.Structure):
 # Hotkey Win32 constants
 WM_HOTKEY = 0x0312
 MOD_ALT = 0x0001
+VK_F8 = 0x77
 VK_F9 = 0x78
-HOTKEY_ID = 1002
+HOTKEY_START_ID = 1003
+HOTKEY_STOP_ID = 1004
+
+# Tray icon Win32 constants
+NIM_ADD = 0x00
+NIM_MODIFY = 0x01
+NIM_DELETE = 0x02
+NIF_MESSAGE = 0x01
+NIF_ICON = 0x02
+NIF_TIP = 0x04
+NIF_INFO = 0x10
 
 # Win32 callback type for window procedures
 WNDPROC = ctypes.WINFUNCTYPE(
@@ -81,6 +99,8 @@ WNDPROC = ctypes.WINFUNCTYPE(
 # Shell32 — Drag-and-Drop
 _shell32 = ctypes.windll.shell32
 _shell32.DragAcceptFiles.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.BOOL]
+_shell32.Shell_NotifyIconW.argtypes = [ctypes.wintypes.DWORD, ctypes.c_void_p]
+_shell32.Shell_NotifyIconW.restype = ctypes.wintypes.BOOL
 _shell32.DragAcceptFiles.restype = None
 _shell32.DragFinish.argtypes = [ctypes.wintypes.HANDLE]
 _shell32.DragFinish.restype = None
@@ -487,11 +507,20 @@ class TrayIcon:
             ("uCallbackMessage", ctypes.wintypes.UINT),
             ("hIcon", ctypes.wintypes.HANDLE),
             ("szTip", ctypes.c_wchar * 128),
+            ("dwState", ctypes.wintypes.DWORD),
+            ("dwStateMask", ctypes.wintypes.DWORD),
+            ("szInfo", ctypes.c_wchar * 256),
+            ("uTimeout", ctypes.wintypes.UINT),
+            ("szInfoTitle", ctypes.c_wchar * 64),
+            ("dwInfoFlags", ctypes.wintypes.DWORD),
         ]
 
-    def __init__(self, hwnd, icon_path, on_stop_callback):
+    def __init__(self, hwnd, icon_path, on_start_callback, on_stop_callback, on_open_callback, on_exit_callback):
         self.hwnd = hwnd
+        self.on_start = on_start_callback
         self.on_stop = on_stop_callback
+        self.on_open = on_open_callback
+        self.on_exit = on_exit_callback
         self._active = False
 
         _user32.LoadImageW.restype = ctypes.wintypes.HANDLE
@@ -519,8 +548,9 @@ class TrayIcon:
             ctypes.cast(self._wndproc_ref, ctypes.c_void_p).value,
         )
 
-        # Register global hotkey (Alt + F9)
-        _user32.RegisterHotKey(self.hwnd, HOTKEY_ID, MOD_ALT, VK_F9)
+        # Register global hotkeys
+        _user32.RegisterHotKey(self.hwnd, HOTKEY_START_ID, MOD_ALT, VK_F8)
+        _user32.RegisterHotKey(self.hwnd, HOTKEY_STOP_ID, MOD_ALT, VK_F9)
 
     def _nid(self):
         nid = self._NOTIFYICONDATA()
@@ -530,7 +560,7 @@ class TrayIcon:
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_USER_TRAY
         nid.hIcon = self._hicon
-        nid.szTip = "RedFFmpegatron 1.3.1"
+        nid.szTip = "RedFFmpegatron 1.3.2"
         return nid
 
     def show(self):
@@ -539,6 +569,17 @@ class TrayIcon:
         nid = self._nid()
         _shell32.Shell_NotifyIconW(NIM_ADD, ctypes.byref(nid))
         self._active = True
+
+    def show_balloon(self, title, message):
+        """Show a Windows balloon notification from the tray icon."""
+        if not self._active:
+            self.show()
+        nid = self._nid()
+        nid.uFlags |= NIF_INFO
+        nid.szInfo = message
+        nid.szInfoTitle = title
+        nid.dwInfoFlags = 1 # NIIF_INFO
+        _shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
 
     def hide(self):
         if not self._active:
@@ -549,9 +590,11 @@ class TrayIcon:
 
     def _show_context_menu(self):
         hmenu = _user32.CreatePopupMenu()
-        _user32.AppendMenuW(
-            hmenu, MF_STRING, IDM_STOP_RECORDING, "Stop Recording (Alt + F9)"
-        )
+        _user32.AppendMenuW(hmenu, MF_STRING, IDM_START_RECORDING, "Start Recording (Alt + F8)")
+        _user32.AppendMenuW(hmenu, MF_STRING, IDM_STOP_RECORDING, "Stop Recording (Alt + F9)")
+        _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
+        _user32.AppendMenuW(hmenu, MF_STRING, IDM_OPEN_APP, "Open RedFFmpegatron")
+        _user32.AppendMenuW(hmenu, MF_STRING, IDM_EXIT, "Exit")
         _user32.SetForegroundWindow(self.hwnd)
         pt = ctypes.wintypes.POINT()
         _user32.GetCursorPos(ctypes.byref(pt))
@@ -559,20 +602,30 @@ class TrayIcon:
             hmenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, 0, self.hwnd, None
         )
         _user32.DestroyMenu(hmenu)
-        if cmd == IDM_STOP_RECORDING:
-            self.on_stop()
+        if cmd == IDM_START_RECORDING:
+            Thread(target=self.on_start, daemon=True).start()
+        elif cmd == IDM_STOP_RECORDING:
+            Thread(target=self.on_stop, daemon=True).start()
+        elif cmd == IDM_OPEN_APP:
+            Thread(target=self.on_open, daemon=True).start()
+        elif cmd == IDM_EXIT:
+            Thread(target=self.on_exit, daemon=True).start()
 
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
-        if msg == WM_HOTKEY and wparam == HOTKEY_ID:
-            # Safely escape the CTypes Windows hook before interacting with Tkinter
-            # by spawning a temporary thread to queue the UI event.
-            from threading import Thread
-
-            Thread(target=self.on_stop, daemon=True).start()
-            return 0
+        if msg == WM_HOTKEY:
+            if wparam == HOTKEY_START_ID:
+                Thread(target=self.on_start, daemon=True).start()
+                return 0
+            elif wparam == HOTKEY_STOP_ID:
+                Thread(target=self.on_stop, daemon=True).start()
+                return 0
         if msg == WM_USER_TRAY:
+            # WM_RBUTTONUP = 0x0205, WM_CONTEXTMENU = 0x007B
             if lparam in (0x0205, 0x007B):
                 self._show_context_menu()
+            # WM_LBUTTONDBLCLK = 0x0203
+            elif lparam == 0x0203:
+                Thread(target=self.on_open, daemon=True).start()
             return 0
         if self._prev_wndproc:
             return _user32.CallWindowProcW(
@@ -581,7 +634,8 @@ class TrayIcon:
         return _user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
     def destroy(self):
-        _user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
+        _user32.UnregisterHotKey(self.hwnd, HOTKEY_START_ID)
+        _user32.UnregisterHotKey(self.hwnd, HOTKEY_STOP_ID)
         self.hide()
         if self._prev_wndproc:
             _user32.SetWindowLongPtrW(self.hwnd, GWL_WNDPROC, self._prev_wndproc)
@@ -1179,7 +1233,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.3.1")
+        master.title("RedFFmpegatron 1.3.2")
 
         dpi = get_real_dpi()
         scaling = int(round((dpi / 96) * 100))
@@ -1285,6 +1339,18 @@ class VideoConverterApp:
         self.trim_streamcopy.trace_add(
             "write", lambda *args: self._update_preview_button_state()
         )
+
+        # Create tray icon (always visible)
+        icon_path = get_icon_path()
+        self._tray_icon = TrayIcon(
+            self.master.winfo_id(),
+            icon_path,
+            lambda: self.master.after(0, self._start_recording),
+            lambda: self.master.after(0, self._stop_recording),
+            lambda: self.master.after(0, self.master.deiconify),
+            lambda: self.master.after(0, self._on_close)
+        )
+        self._tray_icon.show()
 
         # Help windows
         self.output_window_open = False
@@ -1517,13 +1583,20 @@ class VideoConverterApp:
         ctk.CTkLabel(main_frame, text="Output File:").grid(
             row=1, column=0, sticky="w", padx=10, pady=5
         )
-        ctk.CTkEntry(
+        self.output_file_placeholder = "Also used as the destination file for screen recordings"
+        self.output_file_entry = ctk.CTkEntry(
             main_frame,
             textvariable=self.output_file,
             width=350,
             fg_color=SECONDARY_BG,
             text_color=TEXT_COLOR_W,
-        ).grid(row=1, column=1, padx=5, pady=5)
+        )
+        self.output_file_entry.grid(row=1, column=1, padx=5, pady=5)
+        self.output_file_entry.insert(0, self.output_file_placeholder)
+        self.output_file_entry.configure(text_color=PLACEHOLDER_COLOR)
+        self.output_file_entry.bind("<FocusIn>", self._on_output_file_focus_in)
+        self.output_file_entry.bind("<FocusOut>", self._on_output_file_focus_out)
+        self.output_file.trace_add("write", self._on_output_file_change)
 
         # Save As button
         self.btn_save_as = ctk.CTkButton(
@@ -3647,7 +3720,7 @@ class VideoConverterApp:
             "batch_output_folder": self.batch_output_folder.get(),
             "batch_change_container": self.batch_change_container.get(),
             "batch_output_container": self.batch_output_container.get(),
-            "version": "1.3.1",
+            "version": "1.3.2",
         }
         return settings
 
@@ -3771,14 +3844,20 @@ class VideoConverterApp:
             messagebox.showerror("Error", "FFmpeg path is not specified.")
             return
 
+        now = datetime.now()
+        date_str = now.strftime("%d_%m_%y-%H_%M_%S")
+
         # Get output file path
         output_file = self.output_file.get()
         if not output_file:
             # Generate default filename on desktop
             desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-            now = datetime.now()
-            date_str = now.strftime("%d_%m_%y-%H_%M")
             output_file = os.path.join(desktop, f"screen_record-{date_str}.mp4")
+
+        # Set up temporary files for video and audio
+        self.final_record_file = output_file
+        self.temp_video_file = os.path.join(tempfile.gettempdir(), f"temp_vid_{date_str}.mp4")
+        self.temp_audio_file = os.path.join(tempfile.gettempdir(), f"temp_aud_{date_str}.wav")
 
         # Get FPS - use 60 if source or not specified
         fps = self.fps_option.get()
@@ -3791,10 +3870,10 @@ class VideoConverterApp:
         command = [
             self.ffmpeg_path,
             "-y",
-            "-f",
-            "lavfi",
-            "-i",
-            f"ddagrab=framerate={fps}",
+            "-thread_queue_size", "4096",
+            "-use_wallclock_as_timestamps", "1",
+            "-f", "lavfi",
+            "-i", f"ddagrab=framerate={fps}",
         ]
 
         # Add different video filter based on codec
@@ -3830,8 +3909,17 @@ class VideoConverterApp:
         else:
             command.extend(["-rc:v", self.rc.get(), "-b:v", f"{self.bitrate.get()}k"])
 
+        # Add custom additional options if enabled
+        if self.enable_additional_options.get():
+            val = self.additional_options.get().strip()
+            if val and val != self.additional_options_placeholder:
+                try:
+                    command.extend(split(val))
+                except Exception:
+                    command.extend(val.split())
+
         # Constant FPS + No audio
-        command.extend(["-fps_mode", self.fps_mode.get(), "-an", output_file])
+        command.extend(["-fps_mode", self.fps_mode.get(), "-an", self.temp_video_file])
 
         # PRINT THE COMMAND TO CONSOLE
         print("Screen recording command:")
@@ -3846,19 +3934,17 @@ class VideoConverterApp:
             self.status_text.set("Screen is recording now...")
             self.ffmpeg_output.set("Screen recording starting...")
 
-            # Show tray icon so recording can be stopped without unminimizing
-            if not hasattr(self, "_tray_icon") or self._tray_icon is None:
-                hwnd = self.master.winfo_id()
-                self._tray_icon = TrayIcon(
-                    hwnd, icon_path, lambda: self.master.after(0, self._stop_recording)
-                )
-            self._tray_icon.show()
+            # Notify user
+            if hasattr(self, "_tray_icon") and self._tray_icon:
+                self._tray_icon.show_balloon("Recording Started", "Screen is being captured...")
 
             # Minimize window after 1 second
             self._iconify_job = self.master.after(1000, self.master.iconify)
 
             # Start recording process after 1 second delay using Timer
             def start_recording():
+                if not self.is_recording:
+                    return
                 try:
                     startupinfo = None
                     creationflags = 0
@@ -3883,8 +3969,14 @@ class VideoConverterApp:
 
                     self.ffmpeg_output.set("Screen recording started...")
 
+                    # Start audio recording thread if not disabled
+                    if getattr(self, "audio_option", None) and self.audio_option.get() != "disable":
+                        self.audio_thread = Thread(target=self._record_audio_loop)
+                        self.audio_thread.daemon = True
+                        self.audio_thread.start()
+
                     # Start monitoring thread
-                    recording_thread = Thread(target=self._monitor_recording)
+                    recording_thread = Thread(target=self._monitor_recording, daemon=True)
                     recording_thread.start()
                 except Exception as e:
                     self.master.after(
@@ -3914,7 +4006,57 @@ class VideoConverterApp:
         self.master.deiconify()
         messagebox.showerror("Error", f"Failed to start screen recording: {error_msg}")
 
+    def _record_audio_loop(self):
+        try:
+            with pyaudio.PyAudio() as p:
+                try:
+                    wasapi_info = p.get_host_api_info_by_type(pyaudio.paWASAPI)
+                except OSError:
+                    print("Error: WASAPI is not supported.")
+                    return
+                
+                default_speakers = p.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+                if not default_speakers["isLoopbackDevice"]:
+                    found = False
+                    for loopback in p.get_loopback_device_info_generator():
+                        if default_speakers["name"] in loopback["name"]:
+                            default_speakers = loopback
+                            found = True
+                            break
+                    if not found:
+                        print("Audio error: loopback device not found.")
+                        return
+                
+                wave_file = wave.open(self.temp_audio_file, 'wb')
+                try:
+                    wave_file.setnchannels(default_speakers["maxInputChannels"])
+                    wave_file.setsampwidth(pyaudio.get_sample_size(pyaudio.paInt16))
+                    wave_file.setframerate(int(default_speakers["defaultSampleRate"]))
+                    
+                    def callback(in_data, frame_count, time_info, status):
+                        try:
+                            wave_file.writeframes(in_data)
+                        except Exception as e:
+                            print(f"Audio write error: {e}")
+                        return (in_data, pyaudio.paContinue)
+                    
+                    with p.open(format=pyaudio.paInt16,
+                            channels=default_speakers["maxInputChannels"],
+                            rate=int(default_speakers["defaultSampleRate"]),
+                            frames_per_buffer=512,
+                            input=True,
+                            input_device_index=default_speakers["index"],
+                            stream_callback=callback
+                    ) as stream:
+                        while self.is_recording:
+                            time.sleep(0.1)
+                finally:
+                    wave_file.close()
+        except Exception as e:
+            print(f"Audio recording error: {e}")
+
     def _stop_recording(self):
+        self.is_recording = False
         if hasattr(self, "original_title"):
             self.master.title(self.original_title)
 
@@ -3930,16 +4072,11 @@ class VideoConverterApp:
 
         if not self.recording_process:
             # Timer was cancelled before FFmpeg started — just reset UI
-            if self.is_recording:
-                self.is_recording = False
-                self.screen_record_button.configure(
-                    text="Screen Record", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
-                )
-                self.status_text.set("Screen recording cancelled")
-                self.ffmpeg_output.set("")
-                self.master.deiconify()
-                if hasattr(self, "_tray_icon") and self._tray_icon:
-                    self._tray_icon.hide()
+            self.screen_record_button.configure(
+                text="Screen Record", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
+            )
+            self.status_text.set("Screen recording cancelled")
+            self.ffmpeg_output.set("")
             return
 
         try:
@@ -3951,27 +4088,93 @@ class VideoConverterApp:
             print(f"Failed to send stop signal via stdin: {e}")
             self.recording_process.terminate()
 
-        # Wait for process to finish
+        # Start finalization in a background thread to avoid freezing UI
+        Thread(target=self._finalize_recording, daemon=True).start()
+
+    def _finalize_recording(self):
         try:
-            self.recording_process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            self.recording_process.kill()
+            # Wait for process to finish
+            try:
+                self.recording_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.recording_process.kill()
+            
+            # Ensure audio thread is finished
+            if hasattr(self, "audio_thread") and self.audio_thread:
+                self.audio_thread.join(timeout=2)
+                self.audio_thread = None
 
-        # Update UI
-        self.is_recording = False
-        self.recording_process = None
-        self.screen_record_button.configure(
-            text="Screen Record", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
-        )
-        self.status_text.set("Screen recording stopped")
-        self.ffmpeg_output.set("Screen recording completed")
+            self.recording_process = None
+            self.master.after(0, lambda: self.screen_record_button.configure(
+                text="Screen Record", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
+            ))
 
-        # Hide tray icon
-        if hasattr(self, "_tray_icon") and self._tray_icon:
-            self._tray_icon.hide()
+            # --- CHECK: Ensure video file was actually created ---
+            if not os.path.exists(self.temp_video_file) or os.path.getsize(self.temp_video_file) == 0:
+                raise Exception("FFmpeg failed to generate the video file. Check encoder settings.")
+            
+            self.master.after(0, lambda: self.status_text.set("Muxing audio and video..."))
+            self.master.after(0, lambda: self.ffmpeg_output.set("Muxing audio and video... please wait."))
+            
+            startupinfo = None
+            creationflags = 0
+            if os.name == "nt":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+                creationflags = subprocess.CREATE_NO_WINDOW
+            
+            has_audio = (getattr(self, "audio_option", None) and self.audio_option.get() != "disable" and 
+                         os.path.exists(getattr(self, "temp_audio_file", "")) and 
+                         os.path.getsize(self.temp_audio_file) > 100)
+            
+            if has_audio:
+                mux_cmd = [
+                    self.ffmpeg_path,
+                    "-y",
+                    "-i", self.temp_video_file,
+                    "-i", self.temp_audio_file,
+                    "-c:v", "copy",
+                ]
+                # Apply user's Audio Settings (codec, bitrate)
+                self._append_audio_options(mux_cmd)
+                mux_cmd.extend([
+                    "-map", "0:v:0",
+                    "-map", "1:a:0",
+                    self.final_record_file
+                ])
+                
+                # Run muxing and check for success
+                result = subprocess.run(mux_cmd, startupinfo=startupinfo, creationflags=creationflags)
+                if result.returncode != 0 or not os.path.exists(self.final_record_file):
+                    raise Exception("Failed to mux audio and video streams.")
+            else:
+                move(self.temp_video_file, self.final_record_file)
 
-        # Restore window
-        self.master.deiconify()
+            # Cleanup
+            for f in [self.temp_video_file, self.temp_audio_file]:
+                try:
+                    if os.path.exists(f):
+                        os.remove(f)
+                except Exception:
+                    pass
+            
+            self.master.after(0, lambda: self.status_text.set("Screen recording stopped"))
+            filename = os.path.basename(getattr(self, 'final_record_file', 'output'))
+            self.master.after(0, lambda: self.ffmpeg_output.set(f"Saved to {filename}"))
+
+            # Notify user
+            from winsound import MB_ICONASTERISK, MessageBeep
+            MessageBeep(MB_ICONASTERISK)
+            if hasattr(self, "_tray_icon") and self._tray_icon:
+                self.master.after(0, lambda: self._tray_icon.show_balloon("Recording Saved", f"File: {filename}"))
+            
+            self.master.after(0, self.master.deiconify)
+        except Exception as e:
+            print(f"Finalization failed: {e}")
+            self.master.after(0, lambda: self.status_text.set("Error finishing recording"))
+            self.master.after(0, lambda msg=str(e): self.ffmpeg_output.set(msg))
+            self.master.after(0, self.master.deiconify)
 
     def _monitor_recording(self):
         """Monitor the recording process output"""
@@ -6901,6 +7104,27 @@ class VideoConverterApp:
             )
             self.input_file_entry.configure(text_color=PLACEHOLDER_COLOR)
 
+    def _on_output_file_focus_in(self, event):
+        current_text = self.output_file.get()
+        if current_text == getattr(self, "output_file_placeholder", ""):
+            self.output_file_entry.delete(0, "end")
+            self.output_file_entry.configure(text_color=TEXT_COLOR_W)
+
+    def _on_output_file_focus_out(self, event):
+        current_text = self.output_file.get()
+        if not current_text.strip():
+            self.output_file_entry.insert(0, getattr(self, "output_file_placeholder", ""))
+            self.output_file_entry.configure(text_color=PLACEHOLDER_COLOR)
+
+    def _on_output_file_change(self, *args):
+        if not hasattr(self, "output_file_entry") or not hasattr(self, "output_file_placeholder"):
+            return
+        current_text = self.output_file.get()
+        if current_text == self.output_file_placeholder:
+            self.output_file_entry.configure(text_color=PLACEHOLDER_COLOR)
+        else:
+            self.output_file_entry.configure(text_color=TEXT_COLOR_W)
+
     def _on_ffmpeg_path_focus_in(self, event):
         current_text = self.ffmpeg_custom_path.get()
         if current_text == self.ffmpeg_path_placeholder:
@@ -7684,9 +7908,6 @@ class VideoConverterApp:
                 if h_process:
                     kernel32.CloseHandle(h_process)
 
-    def _kill_our_ffmpeg_processes_async(self):
-        """Asynchronous version: runs killer in a background thread."""
-        Thread(target=self._kill_our_ffmpeg_processes, daemon=True).start()
 
     def _open_map_window(self):
         """Open the stream selection window"""
@@ -7990,8 +8211,6 @@ class VideoConverterApp:
         if getattr(self, "is_converting", False):
             self._cancel_conversion()
 
-        if getattr(self, "is_recording", False):
-            self._stop_recording()
 
         if getattr(self, "is_creating_preview", False):
             self._cancel_preview()
