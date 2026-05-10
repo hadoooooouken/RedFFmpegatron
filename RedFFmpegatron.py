@@ -4415,10 +4415,12 @@ class VideoConverterApp:
             else:
                 output_dir = os.path.dirname(normalized_path)
 
+            # Use input file extension as default
+            input_ext = os.path.splitext(normalized_path)[1] or ".mp4"
             output_path = os.path.normpath(
                 os.path.join(
                     output_dir,
-                    f"{base_name}{codec_suffix}_custom.mp4",
+                    f"{base_name}{codec_suffix}_custom{input_ext}",
                 )
             )
 
@@ -4655,10 +4657,12 @@ class VideoConverterApp:
             else:
                 output_dir = os.path.dirname(normalized_path)
 
+            # Use input file extension as default
+            input_ext = os.path.splitext(normalized_path)[1] or ".mp4"
             output_path = os.path.normpath(
                 os.path.join(
                     output_dir,
-                    f"{base_name}{codec_suffix}_custom.mp4",
+                    f"{base_name}{codec_suffix}_custom{input_ext}",
                 )
             )
             self.output_file.set(output_path)
