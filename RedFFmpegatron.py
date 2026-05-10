@@ -560,7 +560,7 @@ class TrayIcon:
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_USER_TRAY
         nid.hIcon = self._hicon
-        nid.szTip = "RedFFmpegatron 1.3.2"
+        nid.szTip = "RedFFmpegatron 1.3.3"
         return nid
 
     def show(self):
@@ -1233,7 +1233,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.3.2")
+        master.title("RedFFmpegatron 1.3.3")
 
         dpi = get_real_dpi()
         scaling = int(round((dpi / 96) * 100))
@@ -1432,6 +1432,7 @@ class VideoConverterApp:
 
     def _setup_variables(self):
         # Initialize all Tkinter control variables
+        self.version = "1.3.3"
         self.ffprobe_cache = OrderedDict()
         self.input_file_tooltip = None
         self._tooltip_generation = 0
@@ -3720,7 +3721,7 @@ class VideoConverterApp:
             "batch_output_folder": self.batch_output_folder.get(),
             "batch_change_container": self.batch_change_container.get(),
             "batch_output_container": self.batch_output_container.get(),
-            "version": "1.3.2",
+            "version": "1.3.3",
         }
         return settings
 
@@ -3848,8 +3849,8 @@ class VideoConverterApp:
         date_str = now.strftime("%d_%m_%y-%H_%M_%S")
 
         # Get output file path
-        output_file = self.output_file.get()
-        if not output_file:
+        output_file = self.output_file.get().strip()
+        if not output_file or output_file == getattr(self, "output_file_placeholder", ""):
             # Generate default filename on desktop
             desktop = os.path.join(os.path.expanduser("~"), "Desktop")
             output_file = os.path.join(desktop, f"screen_record-{date_str}.mp4")
