@@ -1,5 +1,8 @@
 # RedFFmpegatron - Changelog
  
+## [1.3.4] - 2026-05-11
+- **Maintenance**: Code cleanup and removal of redundant method definitions.
+
 ## [1.3.3] - 2026-05-10
 - **Screen Recording**: Fixed a bug where recording would fail or behave unexpectedly if the "Output File" field was empty or contained the default placeholder text.
  

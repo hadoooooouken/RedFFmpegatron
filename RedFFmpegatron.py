@@ -3,10 +3,12 @@
 # Standard library
 import ctypes.wintypes
 import os
-import subprocess
 from shutil import move
+import subprocess
 import sys
 import tempfile
+import time
+import wave
 import tkinter as tk
 from collections import OrderedDict
 from datetime import datetime
@@ -14,8 +16,6 @@ from io import BytesIO
 from json import dump, load
 from re import sub, search, compile, IGNORECASE
 from shlex import split
-import time
-import wave
 from threading import Event, Thread, Timer
 from tkinter import filedialog, messagebox, simpledialog
 from winsound import MB_ICONASTERISK, MessageBeep
@@ -515,12 +515,22 @@ class TrayIcon:
             ("dwInfoFlags", ctypes.wintypes.DWORD),
         ]
 
-    def __init__(self, hwnd, icon_path, on_start_callback, on_stop_callback, on_open_callback, on_exit_callback):
+    def __init__(
+        self,
+        hwnd,
+        icon_path,
+        on_start_callback,
+        on_stop_callback,
+        on_open_callback,
+        on_exit_callback,
+        version="",
+    ):
         self.hwnd = hwnd
         self.on_start = on_start_callback
         self.on_stop = on_stop_callback
         self.on_open = on_open_callback
         self.on_exit = on_exit_callback
+        self.version = version
         self._active = False
 
         _user32.LoadImageW.restype = ctypes.wintypes.HANDLE
@@ -560,7 +570,7 @@ class TrayIcon:
         nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
         nid.uCallbackMessage = WM_USER_TRAY
         nid.hIcon = self._hicon
-        nid.szTip = "RedFFmpegatron 1.3.3"
+        nid.szTip = f"RedFFmpegatron {self.version}"
         return nid
 
     def show(self):
@@ -578,7 +588,7 @@ class TrayIcon:
         nid.uFlags |= NIF_INFO
         nid.szInfo = message
         nid.szInfoTitle = title
-        nid.dwInfoFlags = 1 # NIIF_INFO
+        nid.dwInfoFlags = 1  # NIIF_INFO
         _shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
 
     def hide(self):
@@ -590,8 +600,12 @@ class TrayIcon:
 
     def _show_context_menu(self):
         hmenu = _user32.CreatePopupMenu()
-        _user32.AppendMenuW(hmenu, MF_STRING, IDM_START_RECORDING, "Start Recording (Alt + F8)")
-        _user32.AppendMenuW(hmenu, MF_STRING, IDM_STOP_RECORDING, "Stop Recording (Alt + F9)")
+        _user32.AppendMenuW(
+            hmenu, MF_STRING, IDM_START_RECORDING, "Start Recording (Alt + F8)"
+        )
+        _user32.AppendMenuW(
+            hmenu, MF_STRING, IDM_STOP_RECORDING, "Stop Recording (Alt + F9)"
+        )
         _user32.AppendMenuW(hmenu, MF_SEPARATOR, 0, None)
         _user32.AppendMenuW(hmenu, MF_STRING, IDM_OPEN_APP, "Open RedFFmpegatron")
         _user32.AppendMenuW(hmenu, MF_STRING, IDM_EXIT, "Exit")
@@ -652,7 +666,7 @@ class BatchConverterWindow:
         self._saved_input_file = ""
         self._saved_output_file = ""
         self.current_file_index = 0
-        
+
         # Use persistent variables from main app
         self.batch_output_folder = main_app.batch_output_folder
         self.change_container_var = main_app.batch_change_container
@@ -820,16 +834,18 @@ class BatchConverterWindow:
             )
 
     def _select_output_folder(self):
-        initial_dir = self.batch_output_folder.get() or self.main_app.last_output_dir.get() or os.getcwd()
-        folder = filedialog.askdirectory(
-            parent=self.window,
-            initialdir=initial_dir, 
-            title="Select Output Folder"
+        initial_dir = (
+            self.batch_output_folder.get()
+            or self.main_app.last_output_dir.get()
+            or os.getcwd()
         )
-        
+        folder = filedialog.askdirectory(
+            parent=self.window, initialdir=initial_dir, title="Select Output Folder"
+        )
+
         self.window.lift()
         self.window.focus_force()
-        
+
         if folder:
             normalized_folder = os.path.normpath(folder)
             self.batch_output_folder.set(normalized_folder)
@@ -838,21 +854,21 @@ class BatchConverterWindow:
     def _update_path_label(self):
         if not hasattr(self, "output_path_display"):
             return
-            
+
         batch_folder = self.batch_output_folder.get()
         main_folder = self.main_app.last_output_dir.get()
-        
+
         if batch_folder:
             path_text = batch_folder
         elif main_folder and os.path.exists(main_folder):
             path_text = main_folder
         else:
             path_text = "Original folder(s)"
-            
+
         # Truncate path if too long
         if len(path_text) > 85:
             path_text = path_text[:82] + "..."
-            
+
         self.output_path_display.configure(text=path_text)
 
     def _setup_drag_drop(self):
@@ -1233,7 +1249,8 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        master.title("RedFFmpegatron 1.3.3")
+        self.version = "1.3.4"
+        master.title(f"RedFFmpegatron {self.version}")
 
         dpi = get_real_dpi()
         scaling = int(round((dpi / 96) * 100))
@@ -1347,8 +1364,9 @@ class VideoConverterApp:
             icon_path,
             lambda: self.master.after(0, self._start_recording),
             lambda: self.master.after(0, self._stop_recording),
-            lambda: self.master.after(0, self.master.deiconify),
-            lambda: self.master.after(0, self._on_close)
+            lambda: self.master.after(0, self._restore_app),
+            lambda: self.master.after(0, self._on_close),
+            version=self.version,
         )
         self._tray_icon.show()
 
@@ -1432,12 +1450,13 @@ class VideoConverterApp:
 
     def _setup_variables(self):
         # Initialize all Tkinter control variables
-        self.version = "1.3.3"
         self.ffprobe_cache = OrderedDict()
         self.input_file_tooltip = None
         self._tooltip_generation = 0
         self._tooltip_cancel = Event()
-        self.input_path_placeholder = "Drag and drop a video file here or use the 'Browse' button."
+        self.input_path_placeholder = (
+            "Drag and drop a video file here or use the 'Browse' button."
+        )
         self.input_file = ctk.StringVar()
         self.output_file = ctk.StringVar()
         self.bitrate = ctk.StringVar(value="6000")
@@ -1524,7 +1543,7 @@ class VideoConverterApp:
         self.custom_preset_name = ctk.StringVar(value="")
         self.custom_preset_selected = ctk.StringVar(value="")
         self.loading_preset = False
-        
+
         # Batch converter persistent variables
         self.batch_output_folder = ctk.StringVar(value="")
         self.batch_change_container = ctk.BooleanVar(value=False)
@@ -1549,9 +1568,7 @@ class VideoConverterApp:
             text_color=TEXT_COLOR_W,
         )
         self.input_file_entry.grid(row=0, column=1, padx=5, pady=5)
-        self.input_file_entry.insert(
-            0, self.input_path_placeholder
-        )
+        self.input_file_entry.insert(0, self.input_path_placeholder)
         self.input_file_entry.configure(text_color=PLACEHOLDER_COLOR)
         self.input_file_entry.bind("<FocusIn>", self._on_input_file_focus_in)
         self.input_file_entry.bind("<FocusOut>", self._on_input_file_focus_out)
@@ -1584,7 +1601,9 @@ class VideoConverterApp:
         ctk.CTkLabel(main_frame, text="Output File:").grid(
             row=1, column=0, sticky="w", padx=10, pady=5
         )
-        self.output_file_placeholder = "Also used as the destination file for screen recordings"
+        self.output_file_placeholder = (
+            "Also used as the destination file for screen recordings"
+        )
         self.output_file_entry = ctk.CTkEntry(
             main_frame,
             textvariable=self.output_file,
@@ -3721,7 +3740,7 @@ class VideoConverterApp:
             "batch_output_folder": self.batch_output_folder.get(),
             "batch_change_container": self.batch_change_container.get(),
             "batch_output_container": self.batch_output_container.get(),
-            "version": "1.3.3",
+            "version": self.version,
         }
         return settings
 
@@ -3828,6 +3847,12 @@ class VideoConverterApp:
                 self.batch_converter_window.window.lift()
                 self.batch_converter_window.window.focus_force()
 
+    def _restore_app(self):
+        """Restore window from tray"""
+        self.master.deiconify()
+        self.master.lift()
+        self.master.focus_force()
+
     def _screen_record(self):
         if self.is_recording:
             # Stop recording
@@ -3850,15 +3875,21 @@ class VideoConverterApp:
 
         # Get output file path
         output_file = self.output_file.get().strip()
-        if not output_file or output_file == getattr(self, "output_file_placeholder", ""):
+        if not output_file or output_file == getattr(
+            self, "output_file_placeholder", ""
+        ):
             # Generate default filename on desktop
             desktop = os.path.join(os.path.expanduser("~"), "Desktop")
             output_file = os.path.join(desktop, f"screen_record-{date_str}.mp4")
 
         # Set up temporary files for video and audio
         self.final_record_file = output_file
-        self.temp_video_file = os.path.join(tempfile.gettempdir(), f"temp_vid_{date_str}.mp4")
-        self.temp_audio_file = os.path.join(tempfile.gettempdir(), f"temp_aud_{date_str}.wav")
+        self.temp_video_file = os.path.join(
+            tempfile.gettempdir(), f"temp_vid_{date_str}.mp4"
+        )
+        self.temp_audio_file = os.path.join(
+            tempfile.gettempdir(), f"temp_aud_{date_str}.wav"
+        )
 
         # Get FPS - use 60 if source or not specified
         fps = self.fps_option.get()
@@ -3871,10 +3902,14 @@ class VideoConverterApp:
         command = [
             self.ffmpeg_path,
             "-y",
-            "-thread_queue_size", "4096",
-            "-use_wallclock_as_timestamps", "1",
-            "-f", "lavfi",
-            "-i", f"ddagrab=framerate={fps}",
+            "-thread_queue_size",
+            "4096",
+            "-use_wallclock_as_timestamps",
+            "1",
+            "-f",
+            "lavfi",
+            "-i",
+            f"ddagrab=framerate={fps}",
         ]
 
         # Add different video filter based on codec
@@ -3937,7 +3972,9 @@ class VideoConverterApp:
 
             # Notify user
             if hasattr(self, "_tray_icon") and self._tray_icon:
-                self._tray_icon.show_balloon("Recording Started", "Screen is being captured...")
+                self._tray_icon.show_balloon(
+                    "Recording Started", "Screen is being captured..."
+                )
 
             # Minimize window after 1 second
             self._iconify_job = self.master.after(1000, self.master.iconify)
@@ -3971,13 +4008,18 @@ class VideoConverterApp:
                     self.ffmpeg_output.set("Screen recording started...")
 
                     # Start audio recording thread if not disabled
-                    if getattr(self, "audio_option", None) and self.audio_option.get() != "disable":
+                    if (
+                        getattr(self, "audio_option", None)
+                        and self.audio_option.get() != "disable"
+                    ):
                         self.audio_thread = Thread(target=self._record_audio_loop)
                         self.audio_thread.daemon = True
                         self.audio_thread.start()
 
                     # Start monitoring thread
-                    recording_thread = Thread(target=self._monitor_recording, daemon=True)
+                    recording_thread = Thread(
+                        target=self._monitor_recording, daemon=True
+                    )
                     recording_thread.start()
                 except Exception as e:
                     self.master.after(
@@ -4015,8 +4057,10 @@ class VideoConverterApp:
                 except OSError:
                     print("Error: WASAPI is not supported.")
                     return
-                
-                default_speakers = p.get_device_info_by_index(wasapi_info["defaultOutputDevice"])
+
+                default_speakers = p.get_device_info_by_index(
+                    wasapi_info["defaultOutputDevice"]
+                )
                 if not default_speakers["isLoopbackDevice"]:
                     found = False
                     for loopback in p.get_loopback_device_info_generator():
@@ -4027,27 +4071,28 @@ class VideoConverterApp:
                     if not found:
                         print("Audio error: loopback device not found.")
                         return
-                
-                wave_file = wave.open(self.temp_audio_file, 'wb')
+
+                wave_file = wave.open(self.temp_audio_file, "wb")
                 try:
                     wave_file.setnchannels(default_speakers["maxInputChannels"])
                     wave_file.setsampwidth(pyaudio.get_sample_size(pyaudio.paInt16))
                     wave_file.setframerate(int(default_speakers["defaultSampleRate"]))
-                    
+
                     def callback(in_data, frame_count, time_info, status):
                         try:
                             wave_file.writeframes(in_data)
                         except Exception as e:
                             print(f"Audio write error: {e}")
                         return (in_data, pyaudio.paContinue)
-                    
-                    with p.open(format=pyaudio.paInt16,
-                            channels=default_speakers["maxInputChannels"],
-                            rate=int(default_speakers["defaultSampleRate"]),
-                            frames_per_buffer=512,
-                            input=True,
-                            input_device_index=default_speakers["index"],
-                            stream_callback=callback
+
+                    with p.open(
+                        format=pyaudio.paInt16,
+                        channels=default_speakers["maxInputChannels"],
+                        rate=int(default_speakers["defaultSampleRate"]),
+                        frames_per_buffer=512,
+                        input=True,
+                        input_device_index=default_speakers["index"],
+                        stream_callback=callback,
                     ) as stream:
                         while self.is_recording:
                             time.sleep(0.1)
@@ -4099,24 +4144,39 @@ class VideoConverterApp:
                 self.recording_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.recording_process.kill()
-            
+
             # Ensure audio thread is finished
             if hasattr(self, "audio_thread") and self.audio_thread:
                 self.audio_thread.join(timeout=2)
                 self.audio_thread = None
 
             self.recording_process = None
-            self.master.after(0, lambda: self.screen_record_button.configure(
-                text="Screen Record", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
-            ))
+            self.master.after(
+                0,
+                lambda: self.screen_record_button.configure(
+                    text="Screen Record", fg_color=ACCENT_GREY, hover_color=HOVER_GREY
+                ),
+            )
 
             # --- CHECK: Ensure video file was actually created ---
-            if not os.path.exists(self.temp_video_file) or os.path.getsize(self.temp_video_file) == 0:
-                raise Exception("FFmpeg failed to generate the video file. Check encoder settings.")
-            
-            self.master.after(0, lambda: self.status_text.set("Muxing audio and video..."))
-            self.master.after(0, lambda: self.ffmpeg_output.set("Muxing audio and video... please wait."))
-            
+            if (
+                not os.path.exists(self.temp_video_file)
+                or os.path.getsize(self.temp_video_file) == 0
+            ):
+                raise Exception(
+                    "FFmpeg failed to generate the video file. Check encoder settings."
+                )
+
+            self.master.after(
+                0, lambda: self.status_text.set("Muxing audio and video...")
+            )
+            self.master.after(
+                0,
+                lambda: self.ffmpeg_output.set(
+                    "Muxing audio and video... please wait."
+                ),
+            )
+
             startupinfo = None
             creationflags = 0
             if os.name == "nt":
@@ -4124,29 +4184,35 @@ class VideoConverterApp:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = subprocess.SW_HIDE
                 creationflags = subprocess.CREATE_NO_WINDOW
-            
-            has_audio = (getattr(self, "audio_option", None) and self.audio_option.get() != "disable" and 
-                         os.path.exists(getattr(self, "temp_audio_file", "")) and 
-                         os.path.getsize(self.temp_audio_file) > 100)
-            
+
+            has_audio = (
+                getattr(self, "audio_option", None)
+                and self.audio_option.get() != "disable"
+                and os.path.exists(getattr(self, "temp_audio_file", ""))
+                and os.path.getsize(self.temp_audio_file) > 100
+            )
+
             if has_audio:
                 mux_cmd = [
                     self.ffmpeg_path,
                     "-y",
-                    "-i", self.temp_video_file,
-                    "-i", self.temp_audio_file,
-                    "-c:v", "copy",
+                    "-i",
+                    self.temp_video_file,
+                    "-i",
+                    self.temp_audio_file,
+                    "-c:v",
+                    "copy",
                 ]
                 # Apply user's Audio Settings (codec, bitrate)
                 self._append_audio_options(mux_cmd)
-                mux_cmd.extend([
-                    "-map", "0:v:0",
-                    "-map", "1:a:0",
-                    self.final_record_file
-                ])
-                
+                mux_cmd.extend(
+                    ["-map", "0:v:0", "-map", "1:a:0", self.final_record_file]
+                )
+
                 # Run muxing and check for success
-                result = subprocess.run(mux_cmd, startupinfo=startupinfo, creationflags=creationflags)
+                result = subprocess.run(
+                    mux_cmd, startupinfo=startupinfo, creationflags=creationflags
+                )
                 if result.returncode != 0 or not os.path.exists(self.final_record_file):
                     raise Exception("Failed to mux audio and video streams.")
             else:
@@ -4159,23 +4225,29 @@ class VideoConverterApp:
                         os.remove(f)
                 except Exception:
                     pass
-            
-            self.master.after(0, lambda: self.status_text.set("Screen recording stopped"))
-            filename = os.path.basename(getattr(self, 'final_record_file', 'output'))
+
+            self.master.after(
+                0, lambda: self.status_text.set("Screen recording stopped")
+            )
+            filename = os.path.basename(getattr(self, "final_record_file", "output"))
             self.master.after(0, lambda: self.ffmpeg_output.set(f"Saved to {filename}"))
 
             # Notify user
-            from winsound import MB_ICONASTERISK, MessageBeep
             MessageBeep(MB_ICONASTERISK)
             if hasattr(self, "_tray_icon") and self._tray_icon:
-                self.master.after(0, lambda: self._tray_icon.show_balloon("Recording Saved", f"File: {filename}"))
-            
-            self.master.after(0, self.master.deiconify)
+                self.master.after(
+                    0,
+                    lambda: self._tray_icon.show_balloon(
+                        "Recording Saved", f"File: {filename}"
+                    ),
+                )
+
         except Exception as e:
             print(f"Finalization failed: {e}")
-            self.master.after(0, lambda: self.status_text.set("Error finishing recording"))
+            self.master.after(
+                0, lambda: self.status_text.set("Error finishing recording")
+            )
             self.master.after(0, lambda msg=str(e): self.ffmpeg_output.set(msg))
-            self.master.after(0, self.master.deiconify)
 
     def _monitor_recording(self):
         """Monitor the recording process output"""
@@ -4567,12 +4639,16 @@ class VideoConverterApp:
 
             # Override on_enter to clamp tooltip within screen bounds vertically
             tooltip = self.input_file_tooltip
-            original_on_enter = tooltip.on_enter.__func__ if hasattr(tooltip.on_enter, '__func__') else None
+            original_on_enter = (
+                tooltip.on_enter.__func__
+                if hasattr(tooltip.on_enter, "__func__")
+                else None
+            )
 
             def _clamped_on_enter(event, _self=tooltip):
                 if _self.disable:
                     return
-                _self.last_moved = __import__('time').time()
+                _self.last_moved = __import__("time").time()
                 if _self.status == "outside":
                     _self.status = "inside"
                 if not _self.follow:
@@ -7118,11 +7194,15 @@ class VideoConverterApp:
     def _on_output_file_focus_out(self, event):
         current_text = self.output_file.get()
         if not current_text.strip():
-            self.output_file_entry.insert(0, getattr(self, "output_file_placeholder", ""))
+            self.output_file_entry.insert(
+                0, getattr(self, "output_file_placeholder", "")
+            )
             self.output_file_entry.configure(text_color=PLACEHOLDER_COLOR)
 
     def _on_output_file_change(self, *args):
-        if not hasattr(self, "output_file_entry") or not hasattr(self, "output_file_placeholder"):
+        if not hasattr(self, "output_file_entry") or not hasattr(
+            self, "output_file_placeholder"
+        ):
             return
         current_text = self.output_file.get()
         if current_text == self.output_file_placeholder:
@@ -7913,7 +7993,6 @@ class VideoConverterApp:
                 if h_process:
                     kernel32.CloseHandle(h_process)
 
-
     def _open_map_window(self):
         """Open the stream selection window"""
         input_file = self.input_file.get()
@@ -7938,7 +8017,7 @@ class VideoConverterApp:
         map_window.title(f"Stream Selection - {os.path.basename(input_file)}")
         map_window.geometry("600x600")
         map_window.minsize(600, 550)
-        
+
         # Center relative to parent
         self.master.update_idletasks()
         x = self.master.winfo_x() + (self.master.winfo_width() - 600) // 2
@@ -7982,7 +8061,7 @@ class VideoConverterApp:
         def add_stream_section(title, streams):
             if not streams:
                 return
-            
+
             section_label = ctk.CTkLabel(
                 scroll_frame,
                 text=title,
@@ -7990,7 +8069,7 @@ class VideoConverterApp:
                 text_color=TEXT_COLOR_W,
             )
             section_label.pack(anchor="w", pady=(10, 5), padx=10)
-            
+
             for s in streams:
                 idx = s["index"]
                 label_text = s["text"]
@@ -8002,7 +8081,7 @@ class VideoConverterApp:
 
                 var = ctk.BooleanVar(value=default_val)
                 stream_vars[idx] = {"var": var, "map_code": map_code}
-                
+
                 cb = ctk.CTkCheckBox(
                     scroll_frame,
                     text=label_text,
@@ -8018,30 +8097,40 @@ class VideoConverterApp:
             scroll_frame,
             text="Analyzing file, please wait...",
             font=("Segoe UI", 13),
-            text_color=ACCENT_GREY
+            text_color=ACCENT_GREY,
         )
         loading_label.pack(pady=40)
 
         def fetch_and_populate():
             try:
                 cmd = [self.ffprobe_path, "-hide_banner", input_file]
-                result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                )
+
                 # ffprobe output is in stderr for standard info
                 output = result.stderr or result.stdout
-                
+
                 v_streams = []
                 p_streams = []
                 a_streams = []
                 s_streams = []
-                
+
                 v_count = 0
                 a_count = 0
                 s_count = 0
-                
+
                 # Robust regex to handle technical IDs like [0x1], languages (und), etc.
-                stream_pattern = compile(r'Stream #0:(\d+)(.*?)\s*:\s*(Video|Audio|Subtitle)\s*:\s*(.*)', IGNORECASE)
-                
+                stream_pattern = compile(
+                    r"Stream #0:(\d+)(.*?)\s*:\s*(Video|Audio|Subtitle)\s*:\s*(.*)",
+                    IGNORECASE,
+                )
+
                 for line in output.splitlines():
                     match = stream_pattern.search(line)
                     if match:
@@ -8049,31 +8138,51 @@ class VideoConverterApp:
                         extra = match.group(2).strip()
                         s_type = match.group(3).capitalize()
                         desc = match.group(4).strip()
-                        
+
                         full_text = f"Stream #{idx}{extra}: {desc}"
-                        
+
                         if s_type == "Video":
                             map_code = f"0:v:{v_count}"
                             v_count += 1
                             if "attached pic" in desc.lower():
-                                p_streams.append({"index": idx, "text": full_text, "map_code": map_code})
+                                p_streams.append(
+                                    {
+                                        "index": idx,
+                                        "text": full_text,
+                                        "map_code": map_code,
+                                    }
+                                )
                             else:
-                                v_streams.append({"index": idx, "text": full_text, "map_code": map_code})
+                                v_streams.append(
+                                    {
+                                        "index": idx,
+                                        "text": full_text,
+                                        "map_code": map_code,
+                                    }
+                                )
                         elif s_type == "Audio":
                             map_code = f"0:a:{a_count}"
                             a_count += 1
-                            a_streams.append({"index": idx, "text": full_text, "map_code": map_code})
+                            a_streams.append(
+                                {"index": idx, "text": full_text, "map_code": map_code}
+                            )
                         elif s_type == "Subtitle":
                             map_code = f"0:s:{s_count}"
                             s_count += 1
-                            s_streams.append({"index": idx, "text": full_text, "map_code": map_code})
+                            s_streams.append(
+                                {"index": idx, "text": full_text, "map_code": map_code}
+                            )
 
                 def update_ui():
                     if loading_label.winfo_exists():
                         loading_label.destroy()
-                    
+
                     if not (v_streams or a_streams or s_streams or p_streams):
-                        error_label = ctk.CTkLabel(scroll_frame, text="No streams found or error parsing output", text_color=ACCENT_RED)
+                        error_label = ctk.CTkLabel(
+                            scroll_frame,
+                            text="No streams found or error parsing output",
+                            text_color=ACCENT_RED,
+                        )
                         error_label.pack(pady=20)
                     else:
                         add_stream_section("Video", v_streams)
@@ -8087,48 +8196,61 @@ class VideoConverterApp:
                     uncheck_btn.configure(state="normal")
 
                 map_window.after(0, update_ui)
-                
+
             except Exception as e:
+
                 def show_error():
                     if loading_label.winfo_exists():
                         loading_label.destroy()
-                    error_label = ctk.CTkLabel(scroll_frame, text=f"Error: {str(e)}", text_color=ACCENT_RED)
+                    error_label = ctk.CTkLabel(
+                        scroll_frame, text=f"Error: {str(e)}", text_color=ACCENT_RED
+                    )
                     error_label.pack(pady=20)
-                map_window.after(0, show_error)
 
+                map_window.after(0, show_error)
 
         # Buttons frame
         btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         btn_frame.pack(fill="x", pady=(0, 5))
 
         def save_selection():
-            self.map_selection_cache[input_file] = {idx: data["var"].get() for idx, data in stream_vars.items()}
+            self.map_selection_cache[input_file] = {
+                idx: data["var"].get() for idx, data in stream_vars.items()
+            }
 
         def apply_map():
             selected_vars = [data["var"].get() for data in stream_vars.values()]
             all_selected = all(selected_vars)
-            
+
             if not any(selected_vars):
-                messagebox.showwarning("Warning", "At least one stream must be selected.")
+                messagebox.showwarning(
+                    "Warning", "At least one stream must be selected."
+                )
                 return
 
             save_selection()
-            
+
             current_options = self.additional_options.get()
             if current_options == self.additional_options_placeholder:
                 current_options = ""
-            
+
             # Remove old -map and -ignore_unknown
-            cleaned_options = sub(r'-map\s+\S+', '', current_options)
-            cleaned_options = sub(r'-ignore_unknown\s*', '', cleaned_options).strip()
-            
+            cleaned_options = sub(r"-map\s+\S+", "", current_options)
+            cleaned_options = sub(r"-ignore_unknown\s*", "", cleaned_options).strip()
+
             if all_selected:
                 # If everything is selected, we don't need explicit -map 0:x
                 # FFmpeg's default or our default _build_ffmpeg_command logic will handle it
                 new_options = cleaned_options
             else:
-                selected_codes = [data["map_code"] for data in stream_vars.values() if data["var"].get()]
-                map_str = "-ignore_unknown " + " ".join([f"-map {code}" for code in selected_codes])
+                selected_codes = [
+                    data["map_code"]
+                    for data in stream_vars.values()
+                    if data["var"].get()
+                ]
+                map_str = "-ignore_unknown " + " ".join(
+                    [f"-map {code}" for code in selected_codes]
+                )
                 new_options = f"{cleaned_options} {map_str}".strip()
 
             if not new_options:
@@ -8137,7 +8259,7 @@ class VideoConverterApp:
             else:
                 self.additional_options.set(new_options)
                 self.additional_options_entry.configure(text_color=TEXT_COLOR_W)
-                
+
             self.map_window = None
             map_window.destroy()
 
@@ -8162,7 +8284,7 @@ class VideoConverterApp:
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
-            state="disabled"
+            state="disabled",
         )
         apply_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
 
@@ -8173,7 +8295,7 @@ class VideoConverterApp:
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
-            state="disabled"
+            state="disabled",
         )
         check_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
 
@@ -8184,7 +8306,7 @@ class VideoConverterApp:
             fg_color=ACCENT_GREY,
             hover_color=HOVER_GREY,
             text_color=TEXT_COLOR_B,
-            state="disabled"
+            state="disabled",
         )
         uncheck_btn.pack(side="left", expand=True, fill="x", padx=(0, 5))
 
@@ -8215,7 +8337,6 @@ class VideoConverterApp:
 
         if getattr(self, "is_converting", False):
             self._cancel_conversion()
-
 
         if getattr(self, "is_creating_preview", False):
             self._cancel_preview()
