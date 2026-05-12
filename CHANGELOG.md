@@ -2,6 +2,7 @@
  
 ## [1.3.5] - 2026-05-12
 - **Save As**: Fixed Save As dialog so the selected container extension (MP4/MKV/MOV) is applied correctly and placeholder text is not offered as the default file name.
+- **Tooltip**: Cleaned up file information tooltips by filtering out verbose Chapters blocks.
 
 ## [1.3.4] - 2026-05-11
 - **Maintenance**: Code cleanup and removal of redundant method definitions.

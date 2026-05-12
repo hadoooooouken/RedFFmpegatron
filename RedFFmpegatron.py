@@ -4340,12 +4340,23 @@ class VideoConverterApp:
         # Clean up previous temporary files
         self._cleanup_preview_files()
 
-        # Temporary file for streamcopy
-        temp_streamcopy = os.path.join(temp_dir, f"{base_name}_streamcopy10s.mp4")
+        # Get input file extension
+        input_ext = os.path.splitext(input_path)[1] or ".mp4"
+
+        # Get output file extension (if user specified different format)
+        output_file = self.output_file.get()
+        output_ext = os.path.splitext(output_file)[1] if output_file else input_ext
+        if not output_ext:
+            output_ext = input_ext
+
+        # Temporary file for streamcopy (use input file extension)
+        temp_streamcopy = os.path.join(
+            temp_dir, f"{base_name}_streamcopy10s{input_ext}"
+        )
         self.preview_temp_files.append(temp_streamcopy)
 
-        # Temporary file for encoded preview
-        temp_encoded = os.path.join(temp_dir, f"{base_name}_encoded10s.mp4")
+        # Temporary file for encoded preview (use output file extension if specified, otherwise input extension)
+        temp_encoded = os.path.join(temp_dir, f"{base_name}_encoded10s{output_ext}")
         self.preview_temp_files.append(temp_encoded)
 
         # Command to create streamcopy (preserving all streams)
@@ -4355,11 +4366,11 @@ class VideoConverterApp:
             str(mid_point),
             "-i",
             input_path,
-            "-t",
-            "10",
             "-map",
             "0",
             "-ignore_unknown",
+            "-t",
+            "10",
             "-c",
             "copy",
             "-y",
@@ -4426,6 +4437,30 @@ class VideoConverterApp:
 
                 self.input_file.set(original_input)
                 self.output_file.set(original_output)
+
+            # Add -map 0 after -i for preview encoding if not already present
+            # and if user didn't manually add -map in additional options
+            additional_opts = self.additional_options.get()
+            has_user_map = (
+                additional_opts
+                and additional_opts != self.additional_options_placeholder
+                and "-map" in additional_opts
+            )
+
+            if not has_user_map:
+                try:
+                    i_index = encode_cmd.index("-i")
+                    if i_index + 1 < len(encode_cmd):
+                        # Check if -map is not already present right after -i
+                        if (
+                            i_index + 2 < len(encode_cmd)
+                            and encode_cmd[i_index + 2] != "-map"
+                        ):
+                            encode_cmd.insert(i_index + 2, "-ignore_unknown")
+                            encode_cmd.insert(i_index + 2, "0")
+                            encode_cmd.insert(i_index + 2, "-map")
+                except ValueError:
+                    pass
 
             # Start preview encoding with progress
             self.is_creating_preview = True
@@ -4593,14 +4628,16 @@ class VideoConverterApp:
             if not output:
                 output = (result.stdout or "").strip()
 
-            # Filter out verbose metadata tags to keep tooltip compact
+            # Filter out verbose metadata tags and chapters to keep tooltip compact
             if output:
                 lines = output.splitlines()
                 filtered = []
                 metadata_indent = -1
+                chapters_indent = -1
                 for line in lines:
                     stripped = line.strip()
                     indent = len(line) - len(line.lstrip()) if stripped else 0
+
                     # Detect "Metadata:" header and remember its indent level
                     if stripped == "Metadata:":
                         metadata_indent = indent
@@ -4611,6 +4648,17 @@ class VideoConverterApp:
                             continue
                         # Line at same or lesser indent → metadata block ended
                         metadata_indent = -1
+
+                    # Detect "Chapters:" header and remember its indent level
+                    if stripped == "Chapters:":
+                        chapters_indent = indent
+                        continue
+                    # Inside a chapters block: skip lines indented deeper
+                    if chapters_indent >= 0:
+                        if stripped and indent > chapters_indent:
+                            continue
+                        chapters_indent = -1
+
                     filtered.append(line)
                 output = "\n".join(filtered).strip()
 
@@ -4632,7 +4680,6 @@ class VideoConverterApp:
             error_msg = f"Error reading metadata:\n{str(e)}"
             if self._tooltip_generation == generation:
                 self.master.after(0, lambda: self._set_tooltip_message(error_msg))
-
     def _set_tooltip_message(self, message):
         if getattr(self, "input_file_tooltip", None) is not None:
             self.input_file_tooltip.configure(message=message)
@@ -4758,13 +4805,29 @@ class VideoConverterApp:
             else "_av1"
         )
 
+        # Get default extension: prefer current output file ext, then input file ext, then .mp4
+        output_value_ext = ""
+        output_value_raw = self.output_file.get()
+        if output_value_raw and output_value_raw != getattr(
+            self, "output_file_placeholder", ""
+        ):
+            output_value_ext = os.path.splitext(output_value_raw)[1]
+
+        input_file = self.input_file.get()
+        if output_value_ext:
+            default_ext = output_value_ext
+        elif input_file and not input_file.startswith("Drag and drop"):
+            default_ext = os.path.splitext(input_file)[1] or ".mp4"
+        else:
+            default_ext = ".mp4"
+
         output_value = self.output_file.get()
         if output_value and output_value != getattr(
             self, "output_file_placeholder", ""
         ):
             default_name = output_value
         else:
-            default_name = f"output{codec_suffix}_custom.mp4"
+            default_name = f"output{codec_suffix}_custom{default_ext}"
 
         if self.last_output_dir.get() and os.path.exists(self.last_output_dir.get()):
             initial_dir = self.last_output_dir.get()
@@ -4777,17 +4840,28 @@ class VideoConverterApp:
 
         initialfile = os.path.splitext(os.path.basename(default_name))[0]
 
+        # Reorder filetypes to put current extension first
+        filetypes_list = [
+            ("MP4 Files", "*.mp4"),
+            ("MKV Files", "*.mkv"),
+            ("MOV Files", "*.mov"),
+            ("All Files", "*.*"),
+        ]
+
+        # Move matching extension to the front
+        ext_map = {".mp4": 0, ".mkv": 1, ".mov": 2}
+        if default_ext in ext_map:
+            idx = ext_map[default_ext]
+            filetypes_list = [filetypes_list[idx]] + [
+                f for i, f in enumerate(filetypes_list) if i != idx
+            ]
+
         filename = filedialog.asksaveasfilename(
             title="Save As...",
-            defaultextension=".mp4",
+            defaultextension=default_ext,
             initialfile=initialfile,
             initialdir=initial_dir,
-            filetypes=(
-                ("MP4 Files", "*.mp4"),
-                ("MKV Files", "*.mkv"),
-                ("MOV Files", "*.mov"),
-                ("All Files", "*.*"),
-            ),
+            filetypes=tuple(filetypes_list),
         )
         if filename:
             normalized_path = os.path.normpath(filename)
@@ -6067,7 +6141,7 @@ class VideoConverterApp:
         self.trim_canvas.delete("all")
         width = self.trim_canvas.winfo_width()
         if width < 10:  # Minimum width
-            width = 80
+            width = 820
 
         # Draw the track
         self.trim_canvas.create_line(10, 15, width - 10, 15, fill="#555555", width=3)
@@ -7998,9 +8072,14 @@ class VideoConverterApp:
                     kernel32.CloseHandle(h_process)
 
     def _open_map_window(self):
-        """Open the stream selection window"""
+        """Open a window to visually select streams for mapping"""
+        if self.map_window and self.map_window.winfo_exists():
+            self.map_window.lift()
+            self.map_window.focus_force()
+            return
+
         input_file = self.input_file.get()
-        if not input_file or input_file == self.input_path_placeholder:
+        if not input_file or input_file.startswith("Drag and drop"):
             messagebox.showwarning("Warning", "Please select an input file first.")
             return
 
@@ -8008,11 +8087,11 @@ class VideoConverterApp:
             messagebox.showwarning("Error", "Input file does not exist.")
             return
 
-        if self.map_window is not None:
-            self.map_window.lift()
-            self.map_window.focus_force()
+        if not self.ffprobe_path:
+            messagebox.showerror("Error", "ffprobe.exe not found.")
             return
 
+        # Show map window
         self.map_window = self._create_stream_map_window(input_file)
 
     def _create_stream_map_window(self, input_file):
