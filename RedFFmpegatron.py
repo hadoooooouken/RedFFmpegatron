@@ -1249,7 +1249,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        self.version = "1.3.4"
+        self.version = "1.3.5"
         master.title(f"RedFFmpegatron {self.version}")
 
         dpi = get_real_dpi()
@@ -4758,11 +4758,13 @@ class VideoConverterApp:
             else "_av1"
         )
 
-        default_name = (
-            self.output_file.get()
-            if self.output_file.get()
-            else f"output{codec_suffix}_custom.mp4"
-        )
+        output_value = self.output_file.get()
+        if output_value and output_value != getattr(
+            self, "output_file_placeholder", ""
+        ):
+            default_name = output_value
+        else:
+            default_name = f"output{codec_suffix}_custom.mp4"
 
         if self.last_output_dir.get() and os.path.exists(self.last_output_dir.get()):
             initial_dir = self.last_output_dir.get()
@@ -4773,10 +4775,12 @@ class VideoConverterApp:
         else:
             initial_dir = os.getcwd()
 
+        initialfile = os.path.splitext(os.path.basename(default_name))[0]
+
         filename = filedialog.asksaveasfilename(
             title="Save As...",
             defaultextension=".mp4",
-            initialfile=os.path.basename(default_name),
+            initialfile=initialfile,
             initialdir=initial_dir,
             filetypes=(
                 ("MP4 Files", "*.mp4"),
