@@ -1,5 +1,8 @@
 # RedFFmpegatron - Changelog
  
+## [1.3.6] - 2026-06-03
+- **FFmpeg Command**: Fixed option ordering by ensuring the default stream mapping (`-map 0 -ignore_unknown`) is placed after the input file (`-i`), resolving the "Option map cannot be applied to input url" error.
+
 ## [1.3.5] - 2026-05-12
 - **Save As**: Fixed Save As dialog so the selected container extension (MP4/MKV/MOV) is applied correctly and placeholder text is not offered as the default file name.
 - **Tooltip**: Cleaned up file information tooltips by filtering out verbose Chapters blocks.
