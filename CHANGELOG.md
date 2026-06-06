@@ -1,4 +1,9 @@
 # RedFFmpegatron - Changelog
+
+## [1.3.7] - 2026-06-06
+- **FFmpeg Command Generation**: Resolved a crash when transcoding files with embedded cover art or thumbnails. 
+    - Implemented a robust fallback that copies all secondary video streams (attached pictures) while encoding only the primary video stream (v:0);
+    - Added post-processing to explicitly target encoder-specific options (preset, profile, rate control, etc.) to the primary video stream (:v:0 instead of :v), preventing compatibility errors on copied stream contexts.
  
 ## [1.3.6] - 2026-06-03
 - **FFmpeg Command**: Fixed option ordering by ensuring the default stream mapping (`-map 0 -ignore_unknown`) is placed after the input file (`-i`), resolving the "Option map cannot be applied to input url" error.

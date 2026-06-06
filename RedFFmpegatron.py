@@ -1249,7 +1249,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        self.version = "1.3.6"
+        self.version = "1.3.7"
         master.title(f"RedFFmpegatron {self.version}")
 
         dpi = get_real_dpi()
@@ -5250,7 +5250,7 @@ class VideoConverterApp:
 
         # AMF encoder specific settings
         codec_map = {"hevc": "hevc_amf", "av1": "av1_amf"}
-        command.extend(["-c:v", codec_map.get(self.video_codec.get(), "h264_amf")])
+        command.extend(["-c:v", "copy", "-c:v:0", codec_map.get(self.video_codec.get(), "h264_amf")])
 
         if self.usage.get() != "auto":
             command.extend(["-usage:v", self.usage.get()])
@@ -5371,6 +5371,29 @@ class VideoConverterApp:
         self._append_audio_options(command)
 
         command.append(output_f)
+
+        # Post-process: target video encoder options to the first video stream (:v:0)
+        # to avoid applying them to copied streams (like cover art/attached pics).
+        v0_targets_with_v = {
+            "-preset:v", "-profile:v", "-level:v", "-coder:v",
+            "-usage:v", "-profile_tier:v", "-preencode:v", "-vbaq:v",
+            "-smart_access_video:v", "-async_depth:v", "-preanalysis:v",
+            "-qp_i:v", "-qp_p:v", "-qp_b:v",
+            "-b:v", "-maxrate:v", "-bufsize:v"
+        }
+        v0_targets_no_v = {
+            "-rc", "-pa_activity_type", "-pa_scene_change_detection_enable",
+            "-pa_scene_change_detection_sensitivity", "-pa_static_scene_detection_enable",
+            "-pa_static_scene_detection_sensitivity", "-pa_caq_strength",
+            "-pa_frame_sad_enable", "-pa_ltr_enable", "-pa_paq_mode",
+            "-pa_taq_mode", "-pa_high_motion_quality_boost_mode",
+            "-qvbr_quality_level"
+        }
+        for idx in range(len(command)):
+            if command[idx] in v0_targets_with_v:
+                command[idx] = command[idx] + ":0"
+            elif command[idx] in v0_targets_no_v:
+                command[idx] = command[idx] + ":v:0"
 
         return command
 
