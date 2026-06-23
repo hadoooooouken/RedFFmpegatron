@@ -1,5 +1,8 @@
 # RedFFmpegatron - Changelog
 
+## [1.3.8] - 2026-06-23
+- **Default output container**: Improved automatic output file naming. When a video file with an extension outside the preserved list (`.mp4`, `.mkv`, `.mov`, `.ts`, `.m2ts`, `.webm`) is selected, the output now defaults to `.mp4` for better HEVC/AV1 compatibility. Extensions from the preserved list remain unchanged.
+
 ## [1.3.7] - 2026-06-06
 - **FFmpeg Command Generation**: Resolved a crash when transcoding files with embedded cover art or thumbnails. 
     - Implemented a robust fallback that copies all secondary video streams (attached pictures) while encoding only the primary video stream (v:0);
