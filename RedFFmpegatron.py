@@ -48,6 +48,23 @@ IDM_STOP_RECORDING = 1002
 IDM_OPEN_APP = 1003
 IDM_EXIT = 1004
 
+# Taskbar progress overlay (ITaskbarList3) constants
+CLSID_TASKBAR_LIST = "{56FDF344-FD6D-11D0-958A-006097C9A090}"
+IID_ITASKBARLIST3 = "{EA1AFB91-9E28-4B86-90E9-9E9F8A5EEFAF}"
+CLSCTX_INPROC_SERVER = 0x1
+
+TBPF_NOPROGRESS = 0x0
+TBPF_INDETERMINATE = 0x1
+TBPF_NORMAL = 0x2
+TBPF_ERROR = 0x4
+TBPF_PAUSED = 0x8
+
+# ITaskbarList3 vtable slot indices
+_TBL_VTBL_RELEASE = 2
+_TBL_VTBL_HR_INIT = 3
+_TBL_VTBL_SET_PROGRESS_VALUE = 9
+_TBL_VTBL_SET_PROGRESS_STATE = 10
+
 # Process snapshot constants for killing only our ffmpeg.exe
 TH32CS_SNAPPROCESS = 0x00000002
 PROCESS_QUERY_INFORMATION = 0x0400
@@ -114,6 +131,9 @@ _shell32.DragQueryFileW.restype = ctypes.wintypes.UINT
 
 # User32 — Window Proc & Clipboard
 _user32 = ctypes.windll.user32
+_user32.GetAncestor.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.UINT]
+_user32.GetAncestor.restype = ctypes.wintypes.HWND
+GA_ROOT = 2
 _user32.SetWindowLongPtrW.argtypes = [
     ctypes.wintypes.HWND,
     ctypes.c_int,
@@ -147,6 +167,69 @@ _kernel32.GlobalUnlock.argtypes = [ctypes.wintypes.HANDLE]
 _kernel32.GlobalUnlock.restype = ctypes.wintypes.BOOL
 _kernel32.GlobalFree.argtypes = [ctypes.wintypes.HANDLE]
 _kernel32.GlobalFree.restype = ctypes.wintypes.HANDLE
+
+# Ntdll — NtSuspendProcess/NtResumeProcess, used to pause/resume ffmpeg.
+_ntdll = ctypes.windll.ntdll
+PROCESS_SUSPEND_RESUME = 0x0800
+
+
+def _suspend_process_by_pid(pid: int) -> bool:
+    handle = _kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
+    if not handle:
+        return False
+    try:
+        return _ntdll.NtSuspendProcess(handle) == 0
+    finally:
+        _kernel32.CloseHandle(handle)
+
+
+def _resume_process_by_pid(pid: int) -> bool:
+    handle = _kernel32.OpenProcess(PROCESS_SUSPEND_RESUME, False, pid)
+    if not handle:
+        return False
+    try:
+        return _ntdll.NtResumeProcess(handle) == 0
+    finally:
+        _kernel32.CloseHandle(handle)
+
+
+# Raw ctypes bindings keep taskbar support dependency-free.
+_ole32 = ctypes.windll.ole32
+
+
+class _GUID(ctypes.Structure):
+    _fields_ = [
+        ("Data1", ctypes.wintypes.DWORD),
+        ("Data2", ctypes.wintypes.WORD),
+        ("Data3", ctypes.wintypes.WORD),
+        ("Data4", ctypes.c_ubyte * 8),
+    ]
+
+
+_ole32.CLSIDFromString.argtypes = [ctypes.wintypes.LPCWSTR, ctypes.POINTER(_GUID)]
+_ole32.CLSIDFromString.restype = ctypes.c_long
+_ole32.CoCreateInstance.argtypes = [
+    ctypes.POINTER(_GUID),
+    ctypes.c_void_p,
+    ctypes.wintypes.DWORD,
+    ctypes.POINTER(_GUID),
+    ctypes.POINTER(ctypes.c_void_p),
+]
+_ole32.CoCreateInstance.restype = ctypes.c_long
+_ole32.CoInitialize.argtypes = [ctypes.c_void_p]
+_ole32.CoInitialize.restype = ctypes.c_long
+
+
+def _com_vtable_call(interface_ptr, vtable_index, restype, *argtypes):
+    vtable_address = ctypes.cast(
+        interface_ptr, ctypes.POINTER(ctypes.c_void_p)
+    ).contents.value
+    method_address = ctypes.cast(
+        vtable_address + vtable_index * ctypes.sizeof(ctypes.c_void_p),
+        ctypes.POINTER(ctypes.c_void_p),
+    ).contents.value
+    method_type = ctypes.WINFUNCTYPE(restype, ctypes.c_void_p, *argtypes)
+    return method_type(method_address)
 
 
 def _set_clipboard_text(text: str) -> bool:
@@ -247,6 +330,8 @@ ACCENT_RED = "#ff5555"
 HOVER_RED = "#d83636"
 ACCENT_GREY = "#b2b2b2"
 HOVER_GREY = "#8e8e8e"
+ACCENT_ORANGE = "#f0a020"
+HOVER_ORANGE = "#d38c1a"
 TEXT_COLOR_W = "#ffffff"
 TEXT_COLOR_B = "#000000"
 PLACEHOLDER_COLOR = "#a0a0a0"
@@ -657,11 +742,96 @@ class TrayIcon:
             self._prev_wndproc = None
 
 
+class TaskbarProgress:
+    """Best-effort Windows taskbar progress overlay."""
+
+    def __init__(self, hwnd):
+        self.hwnd = hwnd
+        self._interface_ptr = None
+        try:
+            _ole32.CoInitialize(None)
+            clsid = _GUID()
+            iid = _GUID()
+            _ole32.CLSIDFromString(CLSID_TASKBAR_LIST, ctypes.byref(clsid))
+            _ole32.CLSIDFromString(IID_ITASKBARLIST3, ctypes.byref(iid))
+            ppv = ctypes.c_void_p()
+            result = _ole32.CoCreateInstance(
+                ctypes.byref(clsid),
+                None,
+                CLSCTX_INPROC_SERVER,
+                ctypes.byref(iid),
+                ctypes.byref(ppv),
+            )
+            if result != 0 or not ppv:
+                return
+            self._interface_ptr = ppv
+            hr_init = _com_vtable_call(
+                self._interface_ptr, _TBL_VTBL_HR_INIT, ctypes.c_long
+            )
+            hr_init(self._interface_ptr)
+        except OSError:
+            self._interface_ptr = None
+
+    def _is_available(self):
+        return self._interface_ptr is not None
+
+    def set_progress(self, fraction, total=100):
+        if not self._is_available():
+            return
+        completed = max(0, min(total, int(round(fraction * total))))
+        try:
+            set_value = _com_vtable_call(
+                self._interface_ptr,
+                _TBL_VTBL_SET_PROGRESS_VALUE,
+                ctypes.c_long,
+                ctypes.wintypes.HWND,
+                ctypes.c_ulonglong,
+                ctypes.c_ulonglong,
+            )
+            set_value(self._interface_ptr, self.hwnd, completed, total)
+        except OSError:
+            pass
+
+    def set_state(self, state):
+        if not self._is_available():
+            return
+        try:
+            set_state_fn = _com_vtable_call(
+                self._interface_ptr,
+                _TBL_VTBL_SET_PROGRESS_STATE,
+                ctypes.c_long,
+                ctypes.wintypes.HWND,
+                ctypes.wintypes.DWORD,
+            )
+            set_state_fn(self._interface_ptr, self.hwnd, state)
+        except OSError:
+            pass
+
+    def clear(self):
+        self.set_state(TBPF_NOPROGRESS)
+
+    def release(self):
+        if not self._is_available():
+            return
+        try:
+            release_fn = _com_vtable_call(
+                self._interface_ptr, _TBL_VTBL_RELEASE, ctypes.c_long
+            )
+            release_fn(self._interface_ptr)
+        except OSError:
+            pass
+        finally:
+            self._interface_ptr = None
+
+
+
 class BatchConverterWindow:
     def __init__(self, master, main_app):
         self.master = master
         self.main_app = main_app
         self.is_converting = False
+        self.is_paused = False
+        self.current_process = None
         self.current_file_index = 0
         self.files = main_app.batch_files.copy()
         self._saved_input_file = ""
@@ -1022,6 +1192,7 @@ class BatchConverterWindow:
 
     def _update_main_convert_button(self):
         if hasattr(self.main_app, "convert_button"):
+            self.main_app.is_paused = False
             if self.is_converting:
                 self.main_app.convert_button.configure(
                     text="Cancel", fg_color=ACCENT_RED, hover_color=HOVER_RED
@@ -1041,6 +1212,7 @@ class BatchConverterWindow:
 
         self.is_converting = True
         self.current_file_index = 0
+        self._batch_had_error = False
 
         # Save original input/output so we can restore after batch
         self._saved_input_file = self.main_app.input_file.get()
@@ -1053,6 +1225,8 @@ class BatchConverterWindow:
         self.main_app.convert_button.configure(
             text="Cancel", fg_color=ACCENT_RED, hover_color=HOVER_RED
         )
+        self.main_app.taskbar_progress.set_state(TBPF_NORMAL)
+        self.main_app.taskbar_progress.set_progress(0.0)
 
         self._convert_next_file()
 
@@ -1066,6 +1240,10 @@ class BatchConverterWindow:
             self.main_app.progress_frame.grid_remove()
             self.main_app.ffmpeg_output.set("")
             self.main_app.status_text.set("Batch conversion completed!")
+            if getattr(self, "_batch_had_error", False):
+                self.main_app.taskbar_progress.set_state(TBPF_ERROR)
+            else:
+                self.main_app.taskbar_progress.clear()
             self._update_main_convert_button()
             self._restore_input_output()
             return
@@ -1126,6 +1304,7 @@ class BatchConverterWindow:
             conversion_thread.start()
 
         except Exception as e:
+            self._batch_had_error = True
             self._update_file_status(self.current_file_index, f"Failed: {str(e)}")
             self.current_file_index += 1
             self.master.after(100, self._convert_next_file)
@@ -1152,6 +1331,7 @@ class BatchConverterWindow:
                 encoding="utf-8",
                 errors="replace",
             )
+            self.current_process = process
 
             for line in process.stdout:
                 if not self.is_converting:
@@ -1183,6 +1363,7 @@ class BatchConverterWindow:
                     0, lambda: self._update_file_status(file_index, "Done")
                 )
             elif self.is_converting:
+                self._batch_had_error = True
                 self.master.after(
                     0, lambda: self._update_file_status(file_index, "Failed")
                 )
@@ -1194,6 +1375,8 @@ class BatchConverterWindow:
         except Exception as e:
             error_msg = str(e)
             status = "Cancelled" if not self.is_converting else f"Failed: {error_msg}"
+            if self.is_converting:
+                self._batch_had_error = True
             self.master.after(0, lambda: self._update_file_status(file_index, status))
 
         finally:
@@ -1204,6 +1387,9 @@ class BatchConverterWindow:
                 self.master.after(0, lambda: self.main_app.ffmpeg_output.set(""))
 
     def cancel_batch_conversion(self):
+        if self.is_paused and self.current_process:
+            _resume_process_by_pid(self.current_process.pid)
+            self.is_paused = False
         self.is_converting = False
         if 0 <= self.current_file_index < len(self.files):
             self._update_file_status(self.current_file_index, "Cancelled")
@@ -1212,7 +1398,40 @@ class BatchConverterWindow:
         self._update_main_convert_button()
         self.main_app.progress_frame.grid_remove()
         self.main_app.progress_value.set(0.0)
+        self.main_app.taskbar_progress.clear()
         self._restore_input_output()
+
+    def toggle_pause(self):
+        if not self.is_converting or not self.current_process:
+            return
+        if self.is_paused:
+            self.resume_conversion()
+        else:
+            self.pause_conversion()
+
+    def pause_conversion(self):
+        if not self.current_process:
+            return
+        if not _suspend_process_by_pid(self.current_process.pid):
+            return
+        self.is_paused = True
+        self.main_app.convert_button.configure(
+            text="Resume", fg_color=ACCENT_ORANGE, hover_color=HOVER_ORANGE
+        )
+        self.main_app.status_text.set("Batch conversion paused")
+        self.main_app.taskbar_progress.set_state(TBPF_PAUSED)
+
+    def resume_conversion(self):
+        if not self.current_process:
+            return
+        if not _resume_process_by_pid(self.current_process.pid):
+            return
+        self.is_paused = False
+        self.main_app.convert_button.configure(
+            text="Cancel", fg_color=ACCENT_RED, hover_color=HOVER_RED
+        )
+        self.main_app.status_text.set("Conversion in progress...")
+        self.main_app.taskbar_progress.set_state(TBPF_NORMAL)
 
     def _restore_input_output(self):
         """Restore original input/output file paths after batch conversion"""
@@ -1250,7 +1469,7 @@ class VideoConverterApp:
         self.batch_files = []
         self.video_metadata_cache = {}
         self.master = master
-        self.version = "1.3.9"
+        self.version = "1.4.0"
         master.title(f"RedFFmpegatron {self.version}")
 
         dpi = get_real_dpi()
@@ -1340,6 +1559,7 @@ class VideoConverterApp:
         self.conversion_process = None
         self.conversion_thread = None
         self.is_converting = False
+        self.is_paused = False
 
         self._create_trim_slider()
 
@@ -1370,6 +1590,11 @@ class VideoConverterApp:
             version=self.version,
         )
         self._tray_icon.show()
+
+        taskbar_hwnd = _user32.GetAncestor(self.master.winfo_id(), GA_ROOT)
+        self.taskbar_progress = TaskbarProgress(
+            taskbar_hwnd or self.master.winfo_id()
+        )
 
         # Help windows
         self.output_window_open = False
@@ -3068,6 +3293,7 @@ class VideoConverterApp:
             font=("", 14, "bold"),
         )
         self.convert_button.pack(fill="x", pady=5)
+        self.convert_button.bind("<Button-3>", self._on_convert_right_click)
 
         # Status
         ctk.CTkLabel(main_frame, textvariable=self.status_text).grid(
@@ -3796,7 +4022,10 @@ class VideoConverterApp:
         self.convert_button.configure(
             text="Cancel", fg_color=ACCENT_RED, hover_color="#FF3333"
         )
+        self.is_paused = False
         self.is_converting = True
+        self.taskbar_progress.set_state(TBPF_NORMAL)
+        self.taskbar_progress.set_progress(0.0)
 
         self.status_text.set("Conversion in progress...")
         self.ffmpeg_output.set("Starting conversion...")
@@ -3806,6 +4035,9 @@ class VideoConverterApp:
     def _cancel_conversion(self):
         # Cancel single conversion — just set the flag, _run_ffmpeg handles UI
         if self.is_converting:
+            if self.is_paused and self.conversion_process:
+                _resume_process_by_pid(self.conversion_process.pid)
+                self.is_paused = False
             self.is_converting = False
 
         # Also cancel batch conversion if active
@@ -3816,6 +4048,55 @@ class VideoConverterApp:
             and self.batch_converter_window.is_converting
         ):
             self.batch_converter_window.cancel_batch_conversion()
+
+    def _on_convert_right_click(self, event=None):
+        batch_running = (
+            hasattr(self, "batch_converter_window")
+            and self.batch_converter_window
+            and self.batch_converter_window.is_converting
+        )
+        if batch_running:
+            self.batch_converter_window.toggle_pause()
+        elif self.is_converting:
+            self._toggle_pause()
+
+    def _toggle_pause(self):
+        if not self.is_converting or not self.conversion_process:
+            return
+        if self.is_paused:
+            self._resume_conversion()
+        else:
+            self._pause_conversion()
+
+    def _pause_conversion(self):
+        if not self.conversion_process:
+            return
+        if not _suspend_process_by_pid(self.conversion_process.pid):
+            return
+        self.is_paused = True
+        self.convert_button.configure(
+            text="Resume", fg_color=ACCENT_ORANGE, hover_color=HOVER_ORANGE
+        )
+        self.status_text.set("Conversion paused")
+        self.taskbar_progress.set_state(TBPF_PAUSED)
+
+    def _resume_conversion(self):
+        if not self.conversion_process:
+            return
+        if not _resume_process_by_pid(self.conversion_process.pid):
+            return
+        self.is_paused = False
+        self.convert_button.configure(
+            text="Cancel", fg_color=ACCENT_RED, hover_color=HOVER_RED
+        )
+        self.status_text.set("Conversion in progress...")
+        self.taskbar_progress.set_state(TBPF_NORMAL)
+
+    def _reset_convert_button(self):
+        self.convert_button.configure(
+            text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
+        )
+        self.is_paused = False
 
     def _cancel_preview(self):
         """Cancel preview creation"""
@@ -4530,8 +4811,12 @@ class VideoConverterApp:
         )
 
         if batch_running or single_running:
-            # If any conversion is running, cancel both
-            self._cancel_conversion()
+            if batch_running and self.batch_converter_window.is_paused:
+                self.batch_converter_window.resume_conversion()
+            elif single_running and self.is_paused:
+                self._resume_conversion()
+            else:
+                self._cancel_conversion()
         else:
             # Otherwise, start conversion
             if self.batch_files:
@@ -5362,9 +5647,37 @@ class VideoConverterApp:
 
             command.extend(["-y", "-i", input_f])
 
-            # Add -map 0 and -ignore_unknown if not manually specified
-            if "-map" not in " ".join(other_additional_options):
-                command.extend(["-map", "0", "-ignore_unknown"])
+            # Mapping and subtitle codec handling
+            if "-map" not in other_additional_options:
+                # Preserve attachments only in MKV. Other containers map optional
+                # media streams explicitly so fonts/data do not break muxing.
+                output_ext = os.path.splitext(output_f)[1].lower()
+                if output_ext == ".mkv":
+                    command.extend(["-map", "0", "-ignore_unknown"])
+                else:
+                    command.extend(
+                        [
+                            "-map",
+                            "0:v?",
+                            "-map",
+                            "0:a?",
+                            "-map",
+                            "0:s?",
+                            "-map_metadata",
+                            "0",
+                            "-map_chapters",
+                            "0",
+                            "-ignore_unknown",
+                        ]
+                    )
+
+            output_ext = os.path.splitext(output_f)[1].lower()
+            if output_ext != ".mkv":
+                has_subtitle_codec = any(
+                    part in ("-c:s", "-scodec") for part in other_additional_options
+                ) or any(part in ("-c:s", "-scodec") for part in command)
+                if not has_subtitle_codec:
+                    command.extend(["-c:s", "mov_text"])
 
             # Add other additional options (excluding trim options that were already added)
             if other_additional_options:
@@ -5420,9 +5733,37 @@ class VideoConverterApp:
 
         command.extend(["-y", "-i", input_f])
 
-        # Add -map 0 and -ignore_unknown if not manually specified
-        if "-map" not in " ".join(other_additional_options):
-            command.extend(["-map", "0", "-ignore_unknown"])
+        # Mapping and subtitle codec handling
+        if "-map" not in other_additional_options:
+            # Preserve attachments only in MKV. Other containers map optional
+            # media streams explicitly so fonts/data do not break muxing.
+            output_ext = os.path.splitext(output_f)[1].lower()
+            if output_ext == ".mkv":
+                command.extend(["-map", "0", "-ignore_unknown"])
+            else:
+                command.extend(
+                    [
+                        "-map",
+                        "0:v?",
+                        "-map",
+                        "0:a?",
+                        "-map",
+                        "0:s?",
+                        "-map_metadata",
+                        "0",
+                        "-map_chapters",
+                        "0",
+                        "-ignore_unknown",
+                    ]
+                )
+
+        output_ext = os.path.splitext(output_f)[1].lower()
+        if output_ext != ".mkv":
+            has_subtitle_codec = any(
+                part in ("-c:s", "-scodec") for part in other_additional_options
+            ) or any(part in ("-c:s", "-scodec") for part in command)
+            if not has_subtitle_codec:
+                command.extend(["-c:s", "mov_text"])
 
         # Normal encoding path
         if self.constant_qp_mode.get():
@@ -5719,41 +6060,28 @@ class VideoConverterApp:
                 )
                 self.master.after(0, lambda: self.ffmpeg_output.set(""))
                 self.master.after(0, lambda: self.progress_frame.grid_remove())
-                self.master.after(
-                    0,
-                    lambda: self.convert_button.configure(
-                        text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
-                    ),
-                )
+                self.master.after(0, self._reset_convert_button)
                 self.master.after(0, lambda: MessageBeep(MB_ICONASTERISK))
+                self.master.after(0, self.taskbar_progress.clear)
             elif not self.is_converting:
                 self.master.after(
                     0, lambda: self.status_text.set("Conversion cancelled by user")
                 )
                 self.master.after(0, lambda: self.ffmpeg_output.set(""))
                 self.master.after(0, lambda: self.progress_frame.grid_remove())
-                self.master.after(
-                    0,
-                    lambda: self.convert_button.configure(
-                        text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
-                    ),
-                )
+                self.master.after(0, self._reset_convert_button)
                 self.master.after(
                     0,
                     lambda: messagebox.showinfo(
                         "Cancelled", "Conversion was cancelled"
                     ),
                 )
+                self.master.after(0, self.taskbar_progress.clear)
             else:
                 self.master.after(0, lambda: self.status_text.set("Conversion error!"))
                 self.master.after(0, lambda: self.ffmpeg_output.set(""))
                 self.master.after(0, lambda: self.progress_frame.grid_remove())
-                self.master.after(
-                    0,
-                    lambda: self.convert_button.configure(
-                        text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
-                    ),
-                )
+                self.master.after(0, self._reset_convert_button)
                 self.master.after(
                     0,
                     lambda: messagebox.showerror(
@@ -5765,6 +6093,9 @@ class VideoConverterApp:
                         ),
                     ),
                 )
+                self.master.after(
+                    0, lambda: self.taskbar_progress.set_state(TBPF_ERROR)
+                )
             self.is_converting = False
         except FileNotFoundError:
             self.master.after(
@@ -5772,12 +6103,7 @@ class VideoConverterApp:
             )
             self.master.after(0, lambda: self.ffmpeg_output.set(""))
             self.master.after(0, lambda: self.progress_frame.grid_remove())
-            self.master.after(
-                0,
-                lambda: self.convert_button.configure(
-                    text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
-                ),
-            )
+            self.master.after(0, self._reset_convert_button)
             self.master.after(
                 0,
                 lambda: messagebox.showerror(
@@ -5788,6 +6114,7 @@ class VideoConverterApp:
                     ),
                 ),
             )
+            self.master.after(0, lambda: self.taskbar_progress.set_state(TBPF_ERROR))
             self.is_converting = False
         except Exception:
             self.master.after(
@@ -5798,18 +6125,14 @@ class VideoConverterApp:
             )
             self.master.after(0, lambda: self.ffmpeg_output.set(""))
             self.master.after(0, lambda: self.progress_frame.grid_remove())
-            self.master.after(
-                0,
-                lambda: self.convert_button.configure(
-                    text="Convert", fg_color=ACCENT_RED, hover_color=HOVER_RED
-                ),
-            )
+            self.master.after(0, self._reset_convert_button)
             self.master.after(
                 0,
                 lambda: messagebox.showerror(
                     "Unexpected Error", "An unexpected error occurred during conversion"
                 ),
             )
+            self.master.after(0, lambda: self.taskbar_progress.set_state(TBPF_ERROR))
             self.is_converting = False
 
     def _run_ffprobe_for_size(
@@ -6303,8 +6626,23 @@ class VideoConverterApp:
                     progress = total_seconds / self.total_duration
                     self.progress_value.set(progress)
                     self.progress_label.configure(text=f"{progress * 100:.1f}%")
+                    self.taskbar_progress.set_progress(
+                        self._get_taskbar_progress(progress)
+                    )
             except Exception:
                 pass
+
+    def _get_taskbar_progress(self, current_file_progress):
+        """Return per-file progress, or aggregate progress during a batch."""
+        bc = getattr(self, "batch_converter_window", None)
+        if bc and getattr(bc, "is_converting", False):
+            total_files = len(bc.files)
+            if total_files > 0:
+                overall = (
+                    bc.current_file_index + current_file_progress
+                ) / total_files
+                return min(max(overall, 0.0), 1.0)
+        return current_file_progress
 
     # TRIM & TIME LOGIC
     def _create_trim_slider(self):
@@ -8719,6 +9057,9 @@ class VideoConverterApp:
         if hasattr(self, "_tray_icon") and self._tray_icon:
             self._tray_icon.destroy()
             self._tray_icon = None
+
+        if hasattr(self, "taskbar_progress") and self.taskbar_progress:
+            self.taskbar_progress.release()
 
         # Properly release Windows API resources for Drag-and-Drop
         if hasattr(self, "drop_target") and getattr(self, "drop_target", None):

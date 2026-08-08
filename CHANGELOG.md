@@ -1,5 +1,11 @@
 # RedFFmpegatron - Changelog
 
+## [1.4.0] - 2026-08-08
+- Added Windows taskbar progress for single and batch conversions;
+- Added pause/resume for FFmpeg conversions: right-click **Cancel** to pause, then left-click **Resume** (or right-click again) to continue;
+- Batch conversion now reports combined queue progress in the taskbar;
+- Non-MKV outputs now skip attachment/data streams, use optional stream mapping, and default subtitle encoding to mov_text when no subtitle codec is specified.
+
 ## [1.3.9] - 2026-07-22
 - **Screen Recording Reliability**:
     - Screen recordings are now written to numbered temporary segments;
